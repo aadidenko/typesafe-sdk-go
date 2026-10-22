@@ -11,9 +11,15 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	client, err := typesafe.NewClient(typesafe.Config{APIKey: os.Getenv("TYPESAFE_API_KEY")})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{
@@ -24,13 +30,17 @@ func main() {
 		}},
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	tone, err := response.Choice("tone")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	fmt.Printf("Tone: %s, confidence %.2f, probabilities %v\n", tone.Choice, tone.Confidence, tone.Probabilities)
+	if _, err := fmt.Printf("Tone: %s, confidence %.2f, probabilities %v\n", tone.Choice, tone.Confidence, tone.Probabilities); err != nil {
+		return err
+	}
+
+	return nil
 }

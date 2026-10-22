@@ -14,7 +14,18 @@ import (
 )
 
 func main() {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return fmt.Errorf("default HTTP transport must be *http.Transport")
+	}
+
+	transport := defaultTransport.Clone()
 
 	transport.MaxIdleConnsPerHost = 20
 
@@ -27,7 +38,7 @@ func main() {
 
 	client, err := typesafe.NewClient(config)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -36,14 +47,20 @@ func main() {
 
 	response, err := client.ListModels(ctx, typesafe.WithHeaders(http.Header{"X-Application": {"model-discovery"}}))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	for _, model := range response.Models {
-		fmt.Printf("%s (%s): %s\n", model.Name, model.ReleaseDate, model.Description)
+		if _, err := fmt.Printf("%s (%s): %s\n", model.Name, model.ReleaseDate, model.Description); err != nil {
+			return err
+		}
 	}
 
 	// A selected response.Models[i].Name may be supplied to WithModel on a
 	// subsequent SystemOne call. That option does not mutate client defaults.
-	fmt.Printf("request ID: %s\n", response.RequestID)
+	if _, err := fmt.Printf("request ID: %s\n", response.RequestID); err != nil {
+		return err
+	}
+
+	return nil
 }

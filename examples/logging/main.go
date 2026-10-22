@@ -17,10 +17,19 @@ import (
 )
 
 func main() {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-typesafe-request-id", "local-error-example")
 		w.WriteHeader(http.StatusForbidden)
-		io.WriteString(w, `{"detail":"Account cannot use this resource."}`)
+
+		if _, err := io.WriteString(w, `{"detail":"Account cannot use this resource."}`); err != nil {
+			log.Printf("write fixture response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -30,7 +39,7 @@ func main() {
 	// only a bounded prefix of the wire body, which may be compressed or binary.
 	client, err := typesafe.NewClient(config)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	_, err = client.ListModels(context.Background())
@@ -38,10 +47,14 @@ func main() {
 	var failure *typesafe.HTTPError
 
 	if errors.As(err, &failure) {
-		fmt.Printf("status: %d, request ID: %s, permission denied: %v\n", failure.StatusCode, failure.RequestID, errors.Is(err, typesafe.ErrPermission))
+		if _, err := fmt.Printf("status: %d, request ID: %s, permission denied: %v\n", failure.StatusCode, failure.RequestID, errors.Is(err, typesafe.ErrPermission)); err != nil {
+			return err
+		}
 
 		// failure.RawBody remains available for explicit application error decoding.
 	} else if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
+	return nil
 }

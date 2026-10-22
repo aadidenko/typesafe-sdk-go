@@ -27,18 +27,26 @@ func main() {
 
 	flag.Parse()
 
-	ctx, cancel := context.WithTimeout(context.Background(), *deadline)
-
-	defer cancel()
-
-	if err := run(ctx, *imagePath, typesafe.Compression(*compression), *diagnostics, *bodies); err != nil {
+	if err := runWithDeadline(*deadline, *imagePath, typesafe.Compression(*compression), *diagnostics, *bodies); err != nil {
 		reportError(err)
 		os.Exit(1)
 	}
 }
 
+func runWithDeadline(deadline time.Duration, imagePath string, compression typesafe.Compression, diagnostics, bodies bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+
+	return run(ctx, imagePath, compression, diagnostics, bodies)
+}
+
 func run(ctx context.Context, imagePath string, compression typesafe.Compression, diagnostics, bodies bool) error {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return fmt.Errorf("default HTTP transport must be *http.Transport")
+	}
+
+	transport := defaultTransport.Clone()
 
 	transport.MaxIdleConnsPerHost = 20
 
@@ -67,7 +75,9 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 	selected := ""
 
 	for _, model := range models.Models {
-		fmt.Printf("Available: %s (%s): %s\n", model.Name, model.ReleaseDate, model.Description)
+		if _, err := fmt.Printf("Available: %s (%s): %s\n", model.Name, model.ReleaseDate, model.Description); err != nil {
+			return err
+		}
 
 		if model.Name == config.Model {
 			selected = model.Name
@@ -126,15 +136,22 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 		return err
 	}
 
-	fmt.Printf("Visible probability %.3f; color %s (confidence %.3f, probabilities %v)\n", visible.Probability, choice.Choice, choice.Confidence, choice.Probabilities)
-	fmt.Printf("Expected size %.3f (confidence %.3f, legend %v, probabilities %v)\n", score.Score, score.Confidence, score.Legend, score.Probabilities)
+	if _, err := fmt.Printf("Visible probability %.3f; color %s (confidence %.3f, probabilities %v)\n", visible.Probability, choice.Choice, choice.Confidence, choice.Probabilities); err != nil {
+		return err
+	}
+
+	if _, err := fmt.Printf("Expected size %.3f (confidence %.3f, legend %v, probabilities %v)\n", score.Score, score.Confidence, score.Legend, score.Probabilities); err != nil {
+		return err
+	}
 
 	confidence := "unavailable"
 	if box.Confidence != nil {
 		confidence = fmt.Sprintf("%.3f", *box.Confidence)
 	}
 
-	fmt.Printf("Box %+v, confidence %s; Box Answers: %d\n", box.Box, confidence, len(response.AnswersByKind("box")))
+	if _, err := fmt.Printf("Box %+v, confidence %s; Box Answers: %d\n", box.Box, confidence, len(response.AnswersByKind("box"))); err != nil {
+		return err
+	}
 
 	var app struct {
 		Visible struct {
@@ -153,7 +170,9 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 	}
 
 	// Domain validation and thresholds belong to the application, explicitly.
-	fmt.Printf("Application decode: visible %.3f, color %s, size %.3f\n", app.Visible.Probability, app.Color.Choice, app.Size.Score)
+	if _, err := fmt.Printf("Application decode: visible %.3f, color %s, size %.3f\n", app.Visible.Probability, app.Color.Choice, app.Size.Score); err != nil {
+		return err
+	}
 
 	var full struct {
 		Model string
@@ -164,7 +183,9 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 		return err
 	}
 
-	fmt.Printf("Actual model %s, usage %+v, HTTP %d, request ID %s, retained bytes %d\n", full.Model, full.Usage, response.StatusCode, response.RequestID, len(response.RawBody))
+	if _, err := fmt.Printf("Actual model %s, usage %+v, HTTP %d, request ID %s, retained bytes %d\n", full.Model, full.Usage, response.StatusCode, response.RequestID, len(response.RawBody)); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -182,6 +203,10 @@ func loadImage(path string) (typesafe.Image, error) {
 }
 
 func reportError(err error) {
+	_, _ = fmt.Fprintln(os.Stderr, errorMessage(err)) //nolint:errcheck // This is the final stderr diagnostic; reporting its write failure to the same failed stream cannot help.
+}
+
+func errorMessage(err error) string {
 	var (
 		httpError  *typesafe.HTTPError
 		protocol   *typesafe.ProtocolError
@@ -190,16 +215,16 @@ func reportError(err error) {
 
 	switch {
 	case errors.Is(err, context.Canceled):
-		fmt.Fprintln(os.Stderr, "workflow canceled")
+		return "workflow canceled"
 	case errors.Is(err, context.DeadlineExceeded):
-		fmt.Fprintln(os.Stderr, "workflow deadline exceeded")
+		return "workflow deadline exceeded"
 	case errors.As(err, &httpError):
-		fmt.Fprintf(os.Stderr, "HTTP %d, request ID %s\n", httpError.StatusCode, httpError.RequestID)
+		return fmt.Sprintf("HTTP %d, request ID %s", httpError.StatusCode, httpError.RequestID)
 	case errors.As(err, &protocol):
-		fmt.Fprintf(os.Stderr, "invalid response at %s, request ID %s\n", protocol.Field, protocol.RequestID)
+		return fmt.Sprintf("invalid response at %s, request ID %s", protocol.Field, protocol.RequestID)
 	case errors.As(err, &validation):
-		fmt.Fprintln(os.Stderr, validation)
+		return validation.Error()
 	default:
-		fmt.Fprintln(os.Stderr, err)
+		return err.Error()
 	}
 }
