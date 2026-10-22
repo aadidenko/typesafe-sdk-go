@@ -47,6 +47,10 @@ Responses retain actual `Model`, token `Usage`, all named `Answers`, HTTP
 `StatusCode`, cloned `Headers`, `RequestID`, and original `RawBody`. No response
 close is needed. Typed accessors return errors for missing names or wrong kinds.
 Unknown Answer kinds remain accessible as `UnknownAnswer` with their raw JSON.
+`DecodeAnswers` and `DecodeResponse` decode original data into application structs
+without consuming metadata. [Custom decoding and extensions](docs/extensions-and-decoding.md)
+cover future `RawQuestion` kinds and protected `ExtraBody` fields; the
+[capability matrix](docs/capabilities.md) records this delivery slice.
 Malformed successful responses are `ProtocolError` values with a field path and
 original HTTP metadata. They cannot silently default required fields to zero.
 
@@ -60,8 +64,8 @@ headers and application bodies. The SDK emits no logs by default.
 
 This implementation slice delivers Noul evaluations and the transport/validation
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
-Choice, Score, Box, model discovery, custom decoding, images, retries,
-compression, environment helpers, extension fields, and optional diagnostics
+Choice, Score, Box, model discovery, images, retries,
+compression, environment helpers and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 
 Deterministic local HTTP tests need no credentials or paid requests:
