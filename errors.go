@@ -41,6 +41,7 @@ type ValidationError struct{ Field, Message string }
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("typesafe: invalid %s: %s", e.Field, e.Message)
 }
+
 func (e *ValidationError) Unwrap() error { return ErrValidation }
 
 // HTTPMetadata remains available after the response body is closed.
@@ -60,6 +61,7 @@ type ProtocolError struct {
 func (e *ProtocolError) Error() string {
 	return fmt.Sprintf("typesafe: invalid response at %s: %s", e.Field, e.Message)
 }
+
 func (e *ProtocolError) Unwrap() error { return ErrProtocol }
 
 // HTTPError retains unsuccessful HTTP responses, including non-JSON bodies.
@@ -99,6 +101,7 @@ type TransportError struct {
 }
 
 func (e *TransportError) Error() string { return "typesafe: transport failure" }
+
 func (e *TransportError) Unwrap() error { return e.Cause }
 
 // Is matches ErrTransport while Unwrap retains the original cause.
