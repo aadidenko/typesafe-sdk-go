@@ -57,6 +57,7 @@ func (e *HTTPError) Is(target error) bool {
 	if target == ErrHTTP {
 		return true
 	}
+
 	switch e.StatusCode {
 	case 400:
 		return target == ErrBadRequest

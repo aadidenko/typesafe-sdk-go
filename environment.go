@@ -34,6 +34,7 @@ func LoadEnv(config Config) Config {
 			*item.value = strings.TrimSpace(os.Getenv(item.name))
 		}
 	}
+
 	if config.LogLevel == nil {
 		level, ok := map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "warning": slog.LevelWarn, "error": slog.LevelError, "off": LogLevelOff}[strings.ToLower(strings.TrimSpace(os.Getenv(LogLevelEnv)))]
 		if ok {
@@ -41,7 +42,9 @@ func LoadEnv(config Config) Config {
 		}
 	} else {
 		level := *config.LogLevel
+
 		config.LogLevel = &level
 	}
+
 	return config
 }

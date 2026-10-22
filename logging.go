@@ -25,6 +25,7 @@ func redactedHeaders(headers http.Header) map[string][]string {
 			result[name] = append([]string(nil), values...)
 		}
 	}
+
 	return result
 }
 
@@ -37,10 +38,12 @@ func (c *Client) logHTTPRequest(ctx context.Context, method, path string, attemp
 	if !c.logEnabled(ctx, slog.LevelInfo) {
 		return
 	}
+
 	attrs := []slog.Attr{slog.String("method", method), slog.String("path", path), slog.Int("attempt", attempt), slog.Any("headers", redactedHeaders(headers))}
 	if c.logBodies && body != nil {
 		attrs = append(attrs, bodyLogAttributes(body)...)
 	}
+
 	c.logger.LogAttrs(ctx, slog.LevelInfo, "typesafe request", attrs...)
 }
 
@@ -68,16 +71,20 @@ func (c *Client) logHTTPResponse(ctx context.Context, method, path string, attem
 	if err != nil {
 		level = slog.LevelError
 	}
+
 	if !c.logEnabled(ctx, level) {
 		return
 	}
+
 	attrs := []slog.Attr{slog.String("method", method), slog.String("path", path), slog.Int("attempt", attempt), slog.Int("status", meta.StatusCode), slog.String("request_id", meta.RequestID), slog.Duration("duration", time.Since(started)), slog.Any("headers", redactedHeaders(meta.Headers))}
 	if err != nil {
 		attrs = append(attrs, slog.String("failure", errorCategory(err)))
 	}
+
 	if c.logBodies && meta.RawBody != nil {
 		attrs = append(attrs, bodyLogAttributes(meta.RawBody)...)
 	}
+
 	c.logger.LogAttrs(ctx, level, "typesafe response", attrs...)
 }
 
@@ -85,6 +92,7 @@ func (c *Client) logRetry(ctx context.Context, method, path string, retry int, d
 	if !c.logEnabled(ctx, slog.LevelWarn) {
 		return
 	}
+
 	c.logger.LogAttrs(ctx, slog.LevelWarn, "typesafe retry", slog.String("method", method), slog.String("path", path), slog.Int("retry", retry), slog.Duration("delay", delay), slog.Int("status", meta.StatusCode), slog.String("request_id", meta.RequestID), slog.String("failure", errorCategory(err)))
 }
 
@@ -92,6 +100,7 @@ func (c *Client) logCallFailure(ctx context.Context, method, path string, attemp
 	if err == nil || !c.logEnabled(ctx, slog.LevelError) {
 		return
 	}
+
 	c.logger.LogAttrs(ctx, slog.LevelError, "typesafe call failed", slog.String("method", method), slog.String("path", path), slog.Int("attempts", attempts), slog.Duration("duration", time.Since(started)), slog.Int("status", meta.StatusCode), slog.String("request_id", meta.RequestID), slog.String("failure", errorCategory(err)))
 }
 
@@ -99,6 +108,7 @@ func (c *Client) logProtocolFailure(ctx context.Context, method, path string, me
 	if !errors.Is(err, ErrProtocol) || !c.logEnabled(ctx, slog.LevelError) {
 		return
 	}
+
 	// Neither error messages nor field paths are logged: both can include data
 	// supplied by an upstream service or application, including credentials.
 	c.logger.LogAttrs(ctx, slog.LevelError, "typesafe protocol failure", slog.String("method", method), slog.String("path", path), slog.Int("status", meta.StatusCode), slog.String("request_id", meta.RequestID), slog.String("failure", "protocol"))

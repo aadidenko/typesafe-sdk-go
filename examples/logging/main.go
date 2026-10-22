@@ -23,6 +23,7 @@ func main() {
 		io.WriteString(w, `{"detail":"Account cannot use this resource."}`)
 	}))
 	defer server.Close()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	config := typesafe.LoadEnv(typesafe.Config{APIKey: "fixture-key", BaseURL: server.URL, Logger: logger})
 	// LogBodies defaults to false. Opting in exposes application content and logs
@@ -31,10 +32,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	_, err = client.ListModels(context.Background())
+
 	var failure *typesafe.HTTPError
+
 	if errors.As(err, &failure) {
 		fmt.Printf("status: %d, request ID: %s, permission denied: %v\n", failure.StatusCode, failure.RequestID, errors.Is(err, typesafe.ErrPermission))
+
 		// failure.RawBody remains available for explicit application error decoding.
 	} else if err != nil {
 		log.Fatal(err)

@@ -19,15 +19,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	request := typesafe.SystemOneRequest{State: strings.Repeat("This is an example passage. ", 100), Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "Is this text in English?"}}}
 	// Select none for this call without changing the client's gzip preference.
 	response, err := client.SystemOne(context.Background(), request, typesafe.WithCompression(typesafe.CompressionNone))
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	answer, err := response.Noul("q")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	fmt.Println(answer.Probability)
 }

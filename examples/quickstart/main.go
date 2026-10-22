@@ -15,6 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{
 		State:     "I was charged twice for my subscription. Please refund the extra charge.",
 		Questions: typesafe.Questions{"billing": typesafe.NoulQuestion{Instructions: "Is this message about billing?"}},
@@ -22,9 +23,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	billing, err := response.Noul("billing")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	fmt.Printf("Billing probability: %.2f (model %s, input tokens %d)\n", billing.Probability, response.Model, response.Usage.InputTokens)
 }
