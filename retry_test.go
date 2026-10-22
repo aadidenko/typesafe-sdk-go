@@ -344,11 +344,7 @@ func TestAttemptTimeoutControlAndTotalBudget(t *testing.T) {
 			started := time.Now()
 			_, err := client.SystemOne(context.Background(), noulRequest())
 
-			assertTimeoutBudget(t, err, attempts.Load(), retryTimeouts)
-
-			if time.Since(started) > time.Second {
-				t.Fatal("total call budget did not bound the stalled body")
-			}
+			assertTimeoutBudget(t, err, attempts.Load(), retryTimeouts, time.Since(started))
 		})
 	}
 }
@@ -688,7 +684,7 @@ func serveAttemptRecovery(t *testing.T, w http.ResponseWriter, r *http.Request, 
 	fixtureWrite(t, w, []byte(validResponse))
 }
 
-func assertTimeoutBudget(t *testing.T, err error, attempts int32, retryTimeouts bool) {
+func assertTimeoutBudget(t *testing.T, err error, attempts int32, retryTimeouts bool, elapsed time.Duration) {
 	t.Helper()
 
 	var transport *typesafe.TransportError
@@ -705,6 +701,10 @@ func assertTimeoutBudget(t *testing.T, err error, attempts int32, retryTimeouts 
 
 	if retryTimeouts && (attempts < 2 || attempts > 5) {
 		t.Fatalf("budget did not bound attempts: %d", attempts)
+	}
+
+	if elapsed > time.Second {
+		t.Fatal("total call budget did not bound the stalled body")
 	}
 }
 
