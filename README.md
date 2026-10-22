@@ -55,7 +55,7 @@ Unknown Answer kinds remain accessible as `UnknownAnswer` with their raw JSON.
 `DecodeAnswers` and `DecodeResponse` decode original data into application structs
 without consuming metadata. [Custom decoding and extensions](docs/extensions-and-decoding.md)
 cover future `RawQuestion` kinds and protected `ExtraBody` fields; the
-[capability matrix](docs/capabilities.md) records this delivery slice.
+[capability matrix](docs/capabilities.md) maps all 56 spec stories and the complete pinned Python public surface.
 Malformed successful responses are `ProtocolError` values with a field path and
 original HTTP metadata. They cannot silently default required fields to zero.
 
@@ -70,14 +70,11 @@ headers and application bodies. The SDK emits no logs by default. Supply an opti
 body output. Secret headers are always redacted. See [logging](docs/logging.md) and
 the [local logging/error example](examples/logging/main.go).
 
-This implementation slice delivers Noul, Choice, Score, and Box evaluations, explicit image assets, and the transport/validation
-foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
-See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
-classification, scoring, and the runnable examples. Model discovery, environment
-configuration, custom decoding, protected extension fields, and bounded retries
-are also available. [Request compression](docs/compression.md) defaults to zstd
-for complete prepared bodies of at least 1 KiB, with gzip and no-compression
-options. Optional diagnostics are also available through an explicit logger.
+The SDK supports Noul, Choice, Score, and Box evaluations, explicit image Assets,
+model discovery, application decoding, protected API extensions, bounded retries,
+request compression, and optional diagnostics. See [Questions and typed
+Answers](docs/questions.md), the [capability matrix](docs/capabilities.md), and the
+[acceptance record](docs/acceptance.md).
 
 Deterministic local HTTP tests need no credentials or paid requests:
 
@@ -142,3 +139,61 @@ Calls retry transient failures by default within a hard overall deadline. Use
 [retry policies, cancellation, and prepared-body replay](docs/retries.md).
 Ambiguous network failures may repeat evaluations; the SDK cannot guarantee
 exactly-once execution.
+
+### Complete workflow and example index
+
+The [complete example](examples/complete/main.go) discovers available models,
+retains your explicit selection, creates or loads an image, evaluates all four
+Question types, reads typed Answers, decodes application structures, reports
+model/Usage/HTTP metadata, and handles errors. The application owns its standard
+HTTP transport. It generates a red rectangle when `-image` is omitted.
+
+Select an image-capable model supported by your account; the SDK does not infer
+media capability from model names or silently change your selection. Set the API
+key outside the program, then invoke explicitly:
+
+```sh
+TYPESAFE_DEFAULT_MODEL=your-image-capable-model go run ./examples/complete
+# Optional existing image, gateway environment configuration, and gzip:
+go run ./examples/complete -image photo.png -compression gzip
+```
+
+The second command uses your configured/default model. `-log` enables metadata
+logging; `-log -log-bodies` separately enables potentially sensitive wire body
+prefixes. The default workflow deadline is 30 seconds and `-deadline` changes it.
+
+Every example compiles with normal tests. Running a provider example makes live
+requests and requires an externally supplied `TYPESAFE_API_KEY`.
+
+| Command | Purpose | Network when invoked |
+|---|---|---|
+| `go run ./examples/quickstart` | Noul and token Usage | Provider |
+| `go run ./examples/classification` | Choice and class probabilities | Provider |
+| `go run ./examples/scoring` | Fractional Score and integer rubric levels | Provider |
+| `go run ./examples/images` | Image references and nullable Box Confidence | Provider |
+| `go run ./examples/models` | Environment, model discovery, gateway/custom transport | Provider |
+| `go run ./examples/custom-decoding` | Explicit application Answer/response structures | Provider |
+| `go run ./examples/retries` | Retry policy and shorter caller deadlines | Provider |
+| `go run ./examples/compression` | Client/call compression selection | Provider |
+| `go run ./examples/complete` | Combined model/image/all-Question workflow | Provider |
+| `go run ./examples/extensions` | Future RawQuestion/UnknownAnswer/ExtraBody | Local fixture only |
+| `go run ./examples/logging` | Diagnostics, HTTP errors and request IDs | Local fixture only |
+
+### Manual provider verification
+
+Real-provider tests are excluded by the `typesafe_live` build tag and require a
+second explicit environment opt-in. They have not been run as part of local
+fixture acceptance. They check contract compatibility without asserting semantic
+probability thresholds or model quality. With credentials supplied externally:
+
+```sh
+TYPESAFE_RUN_LIVE=1 go test -tags=typesafe_live -run '^TestLive' -count=1 .
+```
+
+Optional `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL` select your gateway and
+model. Ordinary `go test ./...` and CI do not execute these tests. To verify
+compilation without any provider call or credentials:
+
+```sh
+go test -tags=typesafe_live -run '^$' ./...
+```
