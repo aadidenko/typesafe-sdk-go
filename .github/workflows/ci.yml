@@ -5,6 +5,18 @@ on:
 permissions:
   contents: read
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+          cache: false
+      - name: Read-only formatting and whitespace
+        run: make fmt-check
+      - name: Complete normal and live-tag lint
+        run: make lint
   test:
     runs-on: ubuntu-latest
     steps:
@@ -13,11 +25,11 @@ jobs:
         with:
           go-version: '1.25.0'
           cache: false
-      - name: Formatting
-        run: test -z "$(gofmt -l .)"
       - name: Tests and race detector
         run: go test -race ./...
       - name: Static checks
         run: go vet ./...
-      - name: Build without cgo
+      - name: Build without cgo, including examples
         run: CGO_ENABLED=0 go build ./...
+      - name: Compile live suite without running tests
+        run: go test -tags=typesafe_live -run '^$' ./...
