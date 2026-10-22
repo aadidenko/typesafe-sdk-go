@@ -151,7 +151,7 @@ func TestImageSourcesAndGeneratedReferences(t *testing.T) {
 		io.WriteString(w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
 	}))
 	defer server.Close()
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Compression: typesafe.CompressionNone})
 	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: refs, Assets: assets, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "compare"}}}, typesafe.WithExperimentalImages(true))
 	if err != nil {
 		t.Fatal(err)

@@ -29,7 +29,9 @@ Default base URL is `https://api.typesafe.ai`; default model is `jev-latest`.
 Default attempt timeout is 10 seconds, and the hard overall call budget is 30
 seconds. A shorter context deadline wins. `WithModel`, `WithHeaders` and
 `WithTimeouts` apply to one call; they do not change shared client defaults.
-Model selection matters to SystemOne; ListModels accepts the same applicable
+[Compression configuration](compression.md) selects default zstd, gzip or none
+through `Config.Compression` and `WithCompression`; small bodies remain
+uncompressed. Model selection matters to SystemOne; ListModels accepts the same applicable
 header, timeout and reliability options.
 
 ```go

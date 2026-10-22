@@ -72,8 +72,9 @@ foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
 See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
 classification, scoring, and the runnable examples. Model discovery, environment
 configuration, custom decoding, protected extension fields, and bounded retries
-are also available. Compression and optional diagnostics
-are assigned to dependent tickets and are not claimed as implemented here.
+are also available. [Request compression](docs/compression.md) defaults to zstd
+for complete prepared bodies of at least 1 KiB, with gzip and no-compression
+options. Optional diagnostics are assigned to a dependent ticket.
 
 Deterministic local HTTP tests need no credentials or paid requests:
 
