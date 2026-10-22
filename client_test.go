@@ -252,7 +252,7 @@ func TestCancellationInterruptsActiveHTTPAndBodyRead(t *testing.T) {
 
 			go func() { _, err := client.SystemOne(ctx, noulRequest()); done <- err }()
 
-			<-started
+			awaitCallReady(t, started, done, cancel)
 			cancel()
 
 			awaitCanceledHTTP(t, done)

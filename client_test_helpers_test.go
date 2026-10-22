@@ -1,10 +1,12 @@
 package typesafe_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	typesafe "github.com/aadidenko/typesafe-sdk-go"
 )
@@ -100,4 +102,27 @@ func fixtureFlush(t *testing.T, writer http.ResponseWriter) bool {
 	}
 
 	return true
+}
+
+// awaitCallReady is called only by the test goroutine. Failure paths cancel and
+// consume the client's result before terminating the test.
+func awaitCallReady(t *testing.T, ready <-chan struct{}, result <-chan error, cancel context.CancelFunc) {
+	t.Helper()
+
+	select {
+	case <-ready:
+		return
+	case err := <-result:
+		cancel()
+		t.Fatalf("call completed before fixture readiness: %v", err)
+	case <-time.After(time.Second):
+		cancel()
+
+		select {
+		case err := <-result:
+			t.Fatalf("fixture readiness timed out; client joined after cancellation: %v", err)
+		case <-time.After(time.Second):
+			t.Fatal("fixture readiness timed out; client did not join after cancellation")
+		}
+	}
 }

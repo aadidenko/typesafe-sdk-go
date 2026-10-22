@@ -289,7 +289,7 @@ func TestLoggingPreservesActiveCancellation(t *testing.T) {
 
 	go func() { _, err := client.ListModels(ctx); result <- err }()
 
-	<-started
+	awaitCallReady(t, started, result, cancel)
 	cancel()
 
 	select {

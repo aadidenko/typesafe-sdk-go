@@ -255,14 +255,17 @@ acceptance. This audit commit changes documentation only, checked with
 
 ## Final implementation reconciliation
 
-**Reviewed source and CI revision:
+**Original full-source and CI reconciliation revision:
 `2efd39400775c4f854295ac665400a7eca608222`, 2026-10-23.**
-This includes all implementation slices, the declaration-spacing correction and
-the new CI jobs. This report and accompanying policy/README edits follow that
-revision; they do not change Go source or the tested quality commands. Exact
-delivery-head and matching remote CI evidence belongs to
-[PR #19](https://github.com/aadidenko/typesafe-sdk-go/pull/19), after its final
-commit exists. No future remote CI success is claimed here.
+**Latest reviewed Go source after independent review:
+`9085503ac46127ab4d93eef565ce2f54ca30ae6a`.**
+The original revision includes all implementation slices, declaration-spacing
+corrections and new CI jobs. AUD-010 below records the later test-only readiness
+correction and refreshed validation at the latest source revision. Documentation
+commits follow these source snapshots; they do not change Go source or quality
+commands. Exact delivery-head and matching remote CI evidence belongs to
+[PR #19](https://github.com/aadidenko/typesafe-sdk-go/pull/19). Local results from a
+source snapshot are not substituted for final delivery-head CI.
 
 ### Final scope and independent source reread
 
@@ -362,6 +365,49 @@ these assertions together under the complexity limit. Comparable post-fix 50-cas
 race stress passed, followed by five further race iterations and the final full
 race run below. The earlier failed run remains part of the provenance.
 
+### AUD-010 — Cancellation fixtures could wait forever before readiness
+
+The first independent review of integrated revision
+`1e274211f3bc3c1c749c9a6fcf0049a764a2fe05` reported **one P2 Standards finding**
+and **zero Spec findings**. Checked handler read/write/flush failures could return
+before closing `started`, while the client and logging cancellation tests still
+waited unconditionally for that signal. Their buffered client result could be
+available without being observed; package-wide timeout was the only escape.
+The analogous retry-wait readiness gate had the same unbounded wait shape.
+
+Test-only correction
+[9085503](https://github.com/aadidenko/typesafe-sdk-go/commit/9085503)
+adds one shared readiness wait in the existing test helpers. It selects fixture
+readiness, premature client completion and a one-second setup deadline. A setup
+failure cancels the call and consumes its result, with a separate one-second
+join bound, before failing from the test goroutine. Premature completion is
+already joined by receiving its result and is also canceled. Normal active
+cancellation, error-chain, diagnostic and retry-attempt assertions remain intact;
+handlers continue to report nonfatally and return.
+
+Controlled isolated variants exercised the **existing public-client HTTP test
+cases**, without adding permanent tests of the helper. Both early return before
+readiness and a handler stalled until cancellation were injected for header,
+body-read and logging cases. All six baseline variants hit the two-second package
+timeout. Corrected early-completion variants failed promptly in 0.018–0.467s;
+setup-stall variants canceled, received the client's completion and failed in
+1.034–1.444s. No corrected variant reached its four-second package timeout.
+The expected failures and join diagnostics are regression evidence, not passing
+normal-test results. The unchanged successful paths passed five Go 1.25.0 race
+iterations (1.520s), and Go 1.25.0 vet passed. At source revision `9085503`,
+`make fmt` twice, `make fmt-check` and `make lint` all passed. Before/after SHA256
+maps of all 49 Go files were identical for every command, including normal/live
+format/lint passes with zero findings. This refreshes the source validation after
+the readiness helper was added rather than reusing pre-correction idempotence.
+
+This resolves the lifecycle gap in AUD-005; no SDK runtime, public API, module,
+wire contract, Go source count or suppression changed. It also corrects the
+initial manual-review conclusion: clean analyzers and happy-path race tests had
+not established failure-path readiness coordination. PR #19 is the record for
+follow-up independent review and exact delivery-head CI. Those results must name
+the resulting delivery commit, which includes this report update; local source
+validation at `9085503` is not substituted for that final-head evidence.
+
 ### Final local suppression review
 
 All **14 exact-site annotations** were read in context. The table quotes their
@@ -399,7 +445,7 @@ precedence, useful literal/geometry context and intentional paths/jitter remain
 unchanged. D-002 is implemented by the exact Body.Close exception above. D-010 is
 now checked against resource-owner-return-before-exit in every example. No new
 SDK background worker, dependency, API redesign or separate contract-changing
-finding is required to resolve AUD-001–009. These deviations are not claims that
+finding is required to resolve AUD-001–010. These deviations are not claims that
 an incompatible recommendation was implemented.
 
 ### Local acceptance and remote delivery boundary
