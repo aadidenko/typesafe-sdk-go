@@ -87,6 +87,9 @@ func (f *compressedReplayFixture) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		// Keep the failure buffered until source mutation completes, before replay.
 		w.WriteHeader(http.StatusServiceUnavailable)
 
+		f.state["description"] = "changed after first attempt"
+		f.state["revision"] = "changed after first attempt"
+
 		if err := os.WriteFile(f.path, []byte("changed after first attempt"), 0o600); err != nil {
 			f.t.Error(err)
 
