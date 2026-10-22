@@ -275,7 +275,7 @@ func TestCancellationDuringRetryWaitPreventsMoreAttempts(t *testing.T) {
 
 	go func() { _, err := client.SystemOne(ctx, noulRequest()); done <- err }()
 
-	<-waiting
+	awaitCallReady(t, waiting, done, cancel)
 	cancel()
 
 	select {
