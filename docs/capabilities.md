@@ -19,3 +19,13 @@ SDK parity.
 | `extra_body` last-write-wins merge | ExtraBody transmits unrelated future fields; collision with model/state/questions/assets is a local validation error | `TestExtraBodyAddsFutureFieldsWithoutReplacingCoreRequest`, `TestExtraBodyRejectsCoreCollisionsAndInvalidValuesBeforeHTTP` |
 | Automatic zstd at complete prepared body >= 1 KiB | Zero `Config.Compression` selects available pure-Go zstd; JSON and complete multipart compressed once and replayed identically, bounded to provider's 8 MiB window and 32 MiB logical/encoded sizes | `TestDefaultCompressionThreshold`, `TestMultipartCompressionThresholdUsesCompleteBody`, `TestZstdWindowSupportsLogicalBodiesLargerThanEightMiB`, `TestLogicalBodyLimitIsNotExpandedByCompression`, `TestCompressedBodyAlsoRespectsProviderLimit` |
 | Python compression opt-out; optional zstd dependency | `CompressionNone`, explicit `CompressionZstd`, client/call overrides; standard-library `CompressionGzip` is an intentional addition, no optional codec installation or cgo | `TestCompressionModesAndCallOverrides`, `TestCompressedJSONAndMultipartRetriesReplayExactBytes`, examples/compression |
+
+## Diagnostics slice
+
+| Python capability | Go behavior / deliberate redesign | Evidence |
+|---|---|---|
+| Standard logger and TYPESAFE_LOG_LEVEL | Explicit optional slog.Logger; opt-in LoadEnv level is a snapshot filter; never configures global logging | `TestLoggingIsOptionalAndBodiesNeedSeparateOptIn`, `TestOptionalLogLevelsAreSnapshotsAndNeverInstallLogger` |
+| Request/retry/status/timing/request-ID diagnostics | Actual HTTP attempts and retry delays; safe final-failure and post-HTTP protocol diagnostics | `TestLoggingRedactsSecretHeadersAcrossRetries`, `TestLoggingProtectsHeaderVariantsAndFailureCauses` |
+| DEBUG bodies implicitly enabled in Python | Separate LogBodies opt-in, bounded 4096-byte wire prefix, preserved complete data | `TestLoggingTruncatesBodiesWithoutChangingRetainedData`, docs/logging.md |
+| Secret headers and transport-exception redaction | Copy-and-mask auth/cookies/key/token/secret/credential names including separator variants; never log error cause text | `TestLoggingRedactsSecretHeadersAcrossRetries`, `TestLoggingProtectsHeaderVariantsAndFailureCauses` |
+| Concurrent SDK diagnostics | Shared slog logger with isolated per-call metadata; no mutation of caller logging state | `TestConcurrentLoggingKeepsResponseMetadataSeparate`, examples/logging |

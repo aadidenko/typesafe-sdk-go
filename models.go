@@ -31,7 +31,9 @@ func (c *Client) ListModels(ctx context.Context, options ...CallOption) (*ListMo
 	if err != nil {
 		return nil, err
 	}
-	return parseModels(meta)
+	response, err := parseModels(meta)
+	c.logProtocolFailure(ctx, http.MethodGet, "/v1/models", meta, err)
+	return response, err
 }
 
 func parseModels(meta HTTPMetadata) (*ListModelsResponse, error) {

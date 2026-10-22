@@ -20,7 +20,11 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
-	Compression            Compression
+	Compression Compression
+	// Logger enables SDK diagnostics without changing global logging.
+	Logger *slog.Logger
+	// LogBodies separately opts into bounded wire bodies, which may contain sensitive content.
+	LogBodies              bool
 	Retry                  *RetryPolicy
 	ExperimentalImages     bool
 	APIKey, BaseURL, Model string
@@ -32,6 +36,9 @@ type Config struct {
 }
 type Client struct {
 	compression                 Compression
+	logger                      *slog.Logger
+	logBodies                   bool
+	logLevel                    *slog.Level
 	retry                       RetryPolicy
 	experimentalImages          bool
 	apiKey, baseURL, model      string
@@ -135,7 +142,12 @@ func NewClient(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{compression: config.Compression, retry: retry, experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
+	logLevel := config.LogLevel
+	if logLevel != nil {
+		level := *logLevel
+		logLevel = &level
+	}
+	return &Client{compression: config.Compression, logger: config.Logger, logBodies: config.LogBodies, logLevel: logLevel, retry: retry, experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
@@ -207,15 +219,19 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	}
 	response, err := parseSystemOne(meta, requested)
 	if err != nil {
+		c.logProtocolFailure(ctx, http.MethodPost, "/v1/systemone", meta, err)
 		return nil, err
 	}
 	if err := validateAnsweredQuestions(response, questions); err != nil {
+		c.logProtocolFailure(ctx, http.MethodPost, "/v1/systemone", meta, err)
 		return nil, err
 	}
 	return response, nil
 }
 
-func (c *Client) doAttempt(ctx context.Context, method, path string, body []byte, s callSettings, retryNumber int) (HTTPMetadata, error) {
+func (c *Client) doAttempt(ctx context.Context, method, path string, body []byte, s callSettings, retryNumber int) (meta HTTPMetadata, err error) {
+	started := time.Now()
+	defer func() { c.logHTTPResponse(ctx, method, path, retryNumber+1, started, meta, err) }()
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return HTTPMetadata{}, &TransportError{Cause: err}
@@ -236,12 +252,13 @@ func (c *Client) doAttempt(ctx context.Context, method, path string, body []byte
 	if s.experimentalImages {
 		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")
 	}
+	c.logHTTPRequest(ctx, method, path, retryNumber+1, req.Header, body)
 	response, err := c.httpClient.Do(req)
 	if err != nil {
 		return HTTPMetadata{}, &TransportError{Cause: err}
 	}
 	defer response.Body.Close()
-	meta := HTTPMetadata{StatusCode: response.StatusCode, Headers: response.Header.Clone(), RequestID: response.Header.Get("x-typesafe-request-id")}
+	meta = HTTPMetadata{StatusCode: response.StatusCode, Headers: response.Header.Clone(), RequestID: response.Header.Get("x-typesafe-request-id")}
 	meta.RawBody, err = io.ReadAll(response.Body)
 	if err != nil {
 		return meta, &TransportError{HTTPMetadata: meta, Cause: err}

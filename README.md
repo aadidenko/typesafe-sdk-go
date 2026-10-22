@@ -65,7 +65,10 @@ failures. HTTP errors retain metadata for JSON, non-JSON, and empty bodies;
 status-category sentinels include `ErrAuthentication`, `ErrPermission`,
 `ErrRateLimit`, and `ErrServer`. Context cancellation and deadline errors remain
 available through the error chain. Routine error formatting excludes API keys,
-headers and application bodies. The SDK emits no logs by default.
+headers and application bodies. The SDK emits no logs by default. Supply an optional
+`slog.Logger` through `Config.Logger`; `LogBodies` separately opts into bounded wire
+body output. Secret headers are always redacted. See [logging](docs/logging.md) and
+the [local logging/error example](examples/logging/main.go).
 
 This implementation slice delivers Noul, Choice, Score, and Box evaluations, explicit image assets, and the transport/validation
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
@@ -74,7 +77,7 @@ classification, scoring, and the runnable examples. Model discovery, environment
 configuration, custom decoding, protected extension fields, and bounded retries
 are also available. [Request compression](docs/compression.md) defaults to zstd
 for complete prepared bodies of at least 1 KiB, with gzip and no-compression
-options. Optional diagnostics are assigned to a dependent ticket.
+options. Optional diagnostics are also available through an explicit logger.
 
 Deterministic local HTTP tests need no credentials or paid requests:
 
