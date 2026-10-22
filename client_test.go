@@ -205,7 +205,7 @@ func TestHTTPFailuresRetainMetadataAndCategories(t *testing.T) {
 			}))
 			defer server.Close()
 			client, _ := typesafe.NewClient(typesafe.Config{APIKey: "test", BaseURL: server.URL})
-			_, err := client.SystemOne(context.Background(), noulRequest())
+			_, err := client.SystemOne(context.Background(), noulRequest(), typesafe.WithRetryPolicy(typesafe.RetryPolicy{}))
 			var failure *typesafe.HTTPError
 			if !errors.As(err, &failure) || !errors.Is(err, typesafe.ErrHTTP) || !errors.Is(err, test.category) {
 				t.Fatalf("error=%v", err)
@@ -272,7 +272,7 @@ func TestShortestDeadlineBoundsCall(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), test.caller)
 			defer cancel()
 			start := time.Now()
-			_, err := client.SystemOne(ctx, noulRequest(), typesafe.WithTimeouts(test.attempt, test.call))
+			_, err := client.SystemOne(ctx, noulRequest(), typesafe.WithTimeouts(test.attempt, test.call), typesafe.WithRetryPolicy(typesafe.RetryPolicy{}))
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("deadline identity lost: %v", err)
 			}

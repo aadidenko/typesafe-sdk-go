@@ -71,8 +71,8 @@ This implementation slice delivers Noul, Choice, Score, and Box evaluations, exp
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
 See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
 classification, scoring, and the runnable examples. Model discovery, environment
-configuration, custom decoding and protected extension fields are also available.
-Retries, compression, and optional diagnostics
+configuration, custom decoding, protected extension fields, and bounded retries
+are also available. Compression and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 
 Deterministic local HTTP tests need no credentials or paid requests:
@@ -130,3 +130,11 @@ reading image sources again. `response.Box(name)` returns normalized edge
 coordinates and a `*float64` Confidence: nil represents the model's explicit
 null confidence; a missing confidence is a protocol error. See
 [the compiling image example](examples/images/main.go).
+
+### Retries and deadlines
+
+Calls retry transient failures by default within a hard overall deadline. Use
+`Config.Retry` or `WithRetryPolicy`; `RetryPolicy{}` performs one attempt. See
+[retry policies, cancellation, and prepared-body replay](docs/retries.md).
+Ambiguous network failures may repeat evaluations; the SDK cannot guarantee
+exactly-once execution.

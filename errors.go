@@ -77,7 +77,10 @@ func (e *HTTPError) Is(target error) bool {
 
 // TransportError wraps connection, cancellation, deadline and body-read failures.
 // Its message intentionally excludes URLs, headers and application content.
-type TransportError struct{ Cause error }
+type TransportError struct {
+	HTTPMetadata
+	Cause error
+}
 
 func (e *TransportError) Error() string        { return "typesafe: transport failure" }
 func (e *TransportError) Unwrap() error        { return e.Cause }

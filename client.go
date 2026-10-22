@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,7 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
+	Retry                  *RetryPolicy
 	ExperimentalImages     bool
 	APIKey, BaseURL, Model string
 	HTTPClient             *http.Client
@@ -28,6 +30,7 @@ type Config struct {
 	AttemptTimeout, CallTimeout time.Duration
 }
 type Client struct {
+	retry                       RetryPolicy
 	experimentalImages          bool
 	apiKey, baseURL, model      string
 	httpClient                  *http.Client
@@ -35,6 +38,7 @@ type Client struct {
 	attemptTimeout, callTimeout time.Duration
 }
 type callSettings struct {
+	retry                       RetryPolicy
 	experimentalImages          bool
 	contentType                 string
 	model                       string
@@ -112,15 +116,23 @@ func NewClient(config Config) (*Client, error) {
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{}
 	}
+	retry := DefaultRetryPolicy()
+	if config.Retry != nil {
+		retry = *config.Retry
+	}
+	retry, err = copyRetryPolicy(retry)
+	if err != nil {
+		return nil, err
+	}
 	headers, err := copyHeaders(config.Headers)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
+	return &Client{retry: retry, experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
-	s := callSettings{experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
+	s := callSettings{retry: c.retry, experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
 	if s.headers == nil {
 		s.headers = make(http.Header)
 	}
@@ -196,21 +208,17 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	return response, nil
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body []byte, s callSettings) (HTTPMetadata, error) {
-	total, cancel := context.WithTimeout(ctx, s.callTimeout)
-	defer cancel()
-	attempt, stop := context.WithTimeout(total, s.attemptTimeout)
-	defer stop()
-	req, err := http.NewRequestWithContext(attempt, method, c.baseURL+path, bytes.NewReader(body))
+func (c *Client) doAttempt(ctx context.Context, method, path string, body []byte, s callSettings, retryNumber int) (HTTPMetadata, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return HTTPMetadata{}, &TransportError{err}
+		return HTTPMetadata{}, &TransportError{Cause: err}
 	}
 	req.Header = s.headers.Clone()
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("User-Agent", "typesafe-sdk-go/"+Version+" Go/"+runtime.Version())
 	req.Header.Set("X-TypeSafe-SDK", "typesafe-sdk-go/"+Version)
 	req.Header.Set("X-TypeSafe-Runtime", runtime.Version())
-	req.Header.Set("X-TypeSafe-Retry-Count", "0")
+	req.Header.Set("X-TypeSafe-Retry-Count", strconv.Itoa(retryNumber))
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", s.contentType)
@@ -220,13 +228,13 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 	}
 	response, err := c.httpClient.Do(req)
 	if err != nil {
-		return HTTPMetadata{}, &TransportError{err}
+		return HTTPMetadata{}, &TransportError{Cause: err}
 	}
 	defer response.Body.Close()
 	meta := HTTPMetadata{StatusCode: response.StatusCode, Headers: response.Header.Clone(), RequestID: response.Header.Get("x-typesafe-request-id")}
 	meta.RawBody, err = io.ReadAll(response.Body)
 	if err != nil {
-		return meta, &TransportError{err}
+		return meta, &TransportError{HTTPMetadata: meta, Cause: err}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return meta, &HTTPError{meta}
