@@ -17,3 +17,13 @@ SDK parity.
 | Future Answers ignored by Python parsed model | Direct `UnknownAnswer` discriminator/raw payload preservation; additional unknown Answers retained | `TestFutureQuestionAndUnknownAnswersRoundTrip` |
 | Missing or mismatched requested Answer tolerated by Python | Protocol errors with retained HTTP data; matching future RawQuestion can receive UnknownAnswer | `TestFutureQuestionStillRequiresMatchingNamedAnswer`, existing requested-answer contract tests |
 | `extra_body` last-write-wins merge | ExtraBody transmits unrelated future fields; collision with model/state/questions/assets is a local validation error | `TestExtraBodyAddsFutureFieldsWithoutReplacingCoreRequest`, `TestExtraBodyRejectsCoreCollisionsAndInvalidValuesBeforeHTTP` |
+
+## Diagnostics slice
+
+| Python capability | Go behavior / deliberate redesign | Evidence |
+|---|---|---|
+| Standard logger and TYPESAFE_LOG_LEVEL | Explicit optional slog.Logger; opt-in LoadEnv level is a snapshot filter; never configures global logging | `TestLoggingIsOptionalAndBodiesNeedSeparateOptIn`, `TestOptionalLogLevelsAreSnapshotsAndNeverInstallLogger` |
+| Request/retry/status/timing/request-ID diagnostics | Actual HTTP attempts and retry delays; safe final-failure and post-HTTP protocol diagnostics | `TestLoggingRedactsSecretHeadersAcrossRetries`, `TestLoggingProtectsHeaderVariantsAndFailureCauses` |
+| DEBUG bodies implicitly enabled in Python | Separate LogBodies opt-in, bounded 4096-byte wire prefix, preserved complete data | `TestLoggingTruncatesBodiesWithoutChangingRetainedData`, docs/logging.md |
+| Secret headers and transport-exception redaction | Copy-and-mask auth/cookies/key/token/secret/credential names including separator variants; never log error cause text | `TestLoggingRedactsSecretHeadersAcrossRetries`, `TestLoggingProtectsHeaderVariantsAndFailureCauses` |
+| Concurrent SDK diagnostics | Shared slog logger with isolated per-call metadata; no mutation of caller logging state | `TestConcurrentLoggingKeepsResponseMetadataSeparate`, examples/logging |
