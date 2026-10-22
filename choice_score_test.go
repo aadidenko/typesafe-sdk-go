@@ -35,7 +35,9 @@ func TestMixedNoulChoiceScore(t *testing.T) {
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
+			t.Error(err)
+
+			return
 		}
 
 		if body.State["message"] != "Duplicate charge" || len(body.Questions) != 3 {
