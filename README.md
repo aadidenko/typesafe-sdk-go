@@ -68,7 +68,7 @@ foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
 See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
 classification, scoring, and the runnable examples.
 
-Custom decoding, retries,
+Custom decoding,
 compression, extension fields, and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 
@@ -127,3 +127,11 @@ reading image sources again. `response.Box(name)` returns normalized edge
 coordinates and a `*float64` Confidence: nil represents the model's explicit
 null confidence; a missing confidence is a protocol error. See
 [the compiling image example](examples/images/main.go).
+
+### Retries and deadlines
+
+Calls retry transient failures by default within a hard overall deadline. Use
+`Config.Retry` or `WithRetryPolicy`; `RetryPolicy{}` performs one attempt. See
+[retry policies, cancellation, and prepared-body replay](docs/retries.md).
+Ambiguous network failures may repeat evaluations; the SDK cannot guarantee
+exactly-once execution.
