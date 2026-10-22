@@ -1,0 +1,97 @@
+version: "2"
+
+run:
+  go: "1.25"
+  tests: true
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    - wsl_v5
+    - nlreturn
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - nilerr
+    - unconvert
+    - unparam
+    - errcheck
+    - errorlint
+    - errname
+    - forcetypeassert
+    - bodyclose
+    - noctx
+    - contextcheck
+    - containedctx
+    - fatcontext
+    - durationcheck
+    - revive
+    - gocritic
+    - predeclared
+    - nakedret
+    - misspell
+    - dupword
+    - gochecknoinits
+    - thelper
+    - testpackage
+    - tparallel
+    - sloglint
+    - cyclop
+    - gocognit
+    - funlen
+    - gosec
+    - nolintlint
+  settings:
+    wsl_v5:
+      default: all
+      allow-first-in-block: true
+      allow-whole-block: false
+      cuddle-max-statements: 1
+    nlreturn:
+      block-size: 2
+    errcheck:
+      disable-default-exclusions: true
+      check-blank: true
+      check-type-assertions: true
+    revive:
+      enable-default-rules: true
+      rules:
+        - name: exported
+        - name: early-return
+          arguments: [preserve-scope]
+        - name: import-shadowing
+        - name: max-control-nesting
+          arguments: [3]
+    cyclop:
+      max-complexity: 10
+    gocognit:
+      min-complexity: 15
+    funlen:
+      lines: -1
+      statements: 40
+    nolintlint:
+      allow-unused: false
+      require-specific: true
+      require-explanation: true
+  exclusions:
+    generated: disable
+    presets: []
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/aadidenko/typesafe-sdk-go
+  exclusions:
+    generated: disable
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
