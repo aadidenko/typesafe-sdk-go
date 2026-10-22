@@ -1,0 +1,3 @@
+# Keep future API extensions explicit without overriding core request fields
+
+The SDK will support `RawQuestion` for future question kinds and `ExtraBody` for additional top-level request fields. Conflicts with core fields such as model, state, questions, and assets are validation errors; those fields must be set through the typed request. Authentication, body format, compression, and other SDK-managed headers are also protected from overrides. This deliberately differs from Python's last-write-wins extra body merging, preserving consistency between the validated request and the actual HTTP payload.
