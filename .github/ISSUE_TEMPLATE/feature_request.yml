@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a capability or improvement for the Go SDK.
+title: "Feature: "
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Describe a concrete SDK use case using synthetic data. Do not include credentials or private application data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to achieve, and what is currently missing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and scope
+      description: Include an example of the desired SDK usage and any relevant API contract documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing workarounds and why they are insufficient.

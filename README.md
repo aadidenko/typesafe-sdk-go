@@ -3,6 +3,14 @@
 A Go 1.25+ client for evaluating named Questions against shared State. Module:
 `github.com/aadidenko/typesafe-sdk-go`; public package: `typesafe`.
 
+This is an independent implementation, not an official TypeSafe SDK. It uses
+the official Python SDK v0.7.5 as a compatibility reference; TypeSafe
+endorsement or support is not implied. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Licensed under [MIT](LICENSE). For contributions, see
+[CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities through
+[the security policy](SECURITY.md).
+
 ```sh
 go get github.com/aadidenko/typesafe-sdk-go
 ```
