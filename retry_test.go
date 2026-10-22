@@ -340,10 +340,15 @@ func TestAttemptTimeoutControlAndTotalBudget(t *testing.T) {
 
 			policy.RetryTimeouts = retryTimeouts
 
-			client := mustClient(t, typesafe.Config{APIKey: "test", BaseURL: server.URL, Retry: &policy, AttemptTimeout: 15 * time.Millisecond, CallTimeout: 55 * time.Millisecond})
+			client := mustClient(t, typesafe.Config{APIKey: "test", BaseURL: server.URL, Retry: &policy, AttemptTimeout: 100 * time.Millisecond, CallTimeout: 250 * time.Millisecond})
+			started := time.Now()
 			_, err := client.SystemOne(context.Background(), noulRequest())
 
 			assertTimeoutBudget(t, err, attempts.Load(), retryTimeouts)
+
+			if time.Since(started) > time.Second {
+				t.Fatal("total call budget did not bound the stalled body")
+			}
 		})
 	}
 }
@@ -688,9 +693,11 @@ func assertTimeoutBudget(t *testing.T, err error, attempts int32, retryTimeouts 
 
 	var transport *typesafe.TransportError
 
-	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &transport) || transport.RequestID != "partial" || string(transport.RawBody) != `{"model":` {
-		t.Fatalf("error=%v metadata=%+v", err, transport)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &transport) {
+		t.Fatalf("error=%v metadata=%#v", err, transport)
 	}
+
+	assertTimeoutMetadata(t, transport.HTTPMetadata, retryTimeouts)
 
 	if !retryTimeouts && attempts != 1 {
 		t.Fatalf("timeout retried with disabled control: %d", attempts)
@@ -788,4 +795,28 @@ func prepareReplayImage(t *testing.T, originalImage []byte) (string, typesafe.Im
 	}
 
 	return path, asset
+}
+
+func assertTimeoutMetadata(t *testing.T, meta typesafe.HTTPMetadata, retryTimeouts bool) {
+	t.Helper()
+
+	// A late retry may exhaust the total budget before receiving any response.
+	// Earlier attempt metadata must not be substituted for that final attempt.
+	if retryTimeouts && meta.StatusCode == 0 {
+		assertNoTimeoutResponse(t, meta)
+
+		return
+	}
+
+	if meta.StatusCode != http.StatusOK || meta.RequestID != "partial" || string(meta.RawBody) != `{"model":` {
+		t.Fatalf("invalid final partial response: %#v", meta)
+	}
+}
+
+func assertNoTimeoutResponse(t *testing.T, meta typesafe.HTTPMetadata) {
+	t.Helper()
+
+	if meta.RequestID != "" || len(meta.Headers) != 0 || len(meta.RawBody) != 0 {
+		t.Fatalf("response-less final attempt retained earlier response data: %#v", meta)
+	}
 }
