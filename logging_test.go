@@ -20,69 +20,18 @@ import (
 )
 
 func TestLoggingIsOptionalAndBodiesNeedSeparateOptIn(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-typesafe-request-id", "logging-id")
-		io.WriteString(w, `{"model":"response-body-marker","answers":{"billing":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`)
+		fixtureWriteString(t, w, `{"model":"response-body-marker","answers":{"billing":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`)
 	}))
 	defer server.Close()
 
 	for _, test := range []struct {
 		name             string
 		configured, body bool
-	}{{"default silence", false, false}, {"metadata only", true, false}, {"bodies enabled", true, true}} {
+	}{{name: "default silence", configured: false, body: false}, {name: "metadata only", configured: true, body: false}, {name: "bodies enabled", configured: true, body: true}} {
 		t.Run(test.name, func(t *testing.T) {
-			var logs bytes.Buffer
-
-			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			original := slog.Default()
-
-			slog.SetDefault(logger)
-
-			defer slog.SetDefault(original)
-
-			config := typesafe.Config{APIKey: "test-key", BaseURL: server.URL, LogBodies: test.body}
-			if test.configured {
-				config.Logger = logger
-			}
-
-			client, err := typesafe.NewClient(config)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "request-body-marker", Questions: typesafe.Questions{"billing": typesafe.NoulQuestion{Instructions: "billing?"}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if !test.configured {
-				if logs.Len() != 0 {
-					t.Fatalf("SDK used global logging: %s", logs.String())
-				}
-
-				return
-			}
-
-			output := logs.String()
-			for _, expected := range []string{"/v1/systemone", "logging-id", `"status":200`, `"attempt":1`, `"duration"`} {
-				if !strings.Contains(output, expected) {
-					t.Errorf("missing metadata %q: %s", expected, output)
-				}
-			}
-
-			for _, marker := range []string{"request-body-marker", "response-body-marker"} {
-				if strings.Contains(output, marker) != test.body {
-					t.Errorf("body opt-in not respected for %s: %s", marker, output)
-				}
-			}
-
-			if response.Model != "response-body-marker" || response.RequestID != "logging-id" {
-				t.Fatal("logging consumed response")
-			}
-
-			if slog.Default() != logger {
-				t.Fatal("SDK changed caller global logger")
-			}
+			exerciseLoggingOptIn(t, server.URL, test.configured, test.body)
 		})
 	}
 }
@@ -90,19 +39,19 @@ func TestLoggingIsOptionalAndBodiesNeedSeparateOptIn(t *testing.T) {
 func TestLoggingRedactsSecretHeadersAcrossRetries(t *testing.T) {
 	var requests atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Set-Cookie", "response-cookie-secret")
 		w.Header().Set("X-Session-Token", "response-token-secret")
 		w.Header().Set("x-typesafe-request-id", "retry-log-id")
 
 		if requests.Add(1) == 1 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			io.WriteString(w, "server-error-body")
+			fixtureWriteString(t, w, "server-error-body")
 
 			return
 		}
 
-		io.WriteString(w, `{"models":[]}`)
+		fixtureWriteString(t, w, `{"models":[]}`)
 	}))
 
 	defer server.Close()
@@ -142,13 +91,13 @@ func TestLoggingRedactsSecretHeadersAcrossRetries(t *testing.T) {
 }
 
 func TestLoggingProtectsHeaderVariantsAndFailureCauses(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		for _, name := range []string{"X-API-Key", "Api_Key", "X-Gateway-Key", "X-Auth-Token", "X-Client-Secret", "CoOkIe", "PrOxY-AuThOrIzAtIoN"} {
 			w.Header().Set(name, "header-secret-"+name)
 		}
 
 		w.Header().Set("x-typesafe-request-id", "failure-id")
-		io.WriteString(w, `{"models":[{"name":"model","description":"secret-body-marker"}]}`)
+		fixtureWriteString(t, w, `{"models":[{"name":"model","description":"secret-body-marker"}]}`)
 	}))
 	defer server.Close()
 
@@ -170,32 +119,7 @@ func TestLoggingProtectsHeaderVariantsAndFailureCauses(t *testing.T) {
 		t.Fatalf("unsafe/missing protocol diagnostics: %s", logs.String())
 	}
 
-	logs.Reset()
-
-	transport := logErrorTransport{}
-
-	client, err = typesafe.NewClient(typesafe.Config{APIKey: "private-key", BaseURL: server.URL, Logger: logger, HTTPClient: &http.Client{Transport: transport}, Retry: &typesafe.RetryPolicy{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.ListModels(context.Background())
-	if !errors.Is(err, typesafe.ErrTransport) {
-		t.Fatalf("expected transport error: %v", err)
-	}
-
-	if strings.Contains(logs.String(), "private-key") || strings.Contains(logs.String(), "transport-private-marker") || strings.Contains(err.Error(), "private-key") || !strings.Contains(logs.String(), `"failure":"transport"`) {
-		t.Fatalf("unsafe/missing transport diagnostics: %s", logs.String())
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	logs.Reset()
-
-	_, err = client.ListModels(ctx)
-	if !errors.Is(err, context.Canceled) || !strings.Contains(logs.String(), `"failure":"canceled"`) {
-		t.Fatalf("cancellation diagnostics missing: %v %s", err, logs.String())
-	}
+	assertTransportFailureLogs(t, logger, server.URL, &logs)
 }
 
 type logErrorTransport struct{}
@@ -206,7 +130,7 @@ func (logErrorTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func TestLoggingTruncatesBodiesWithoutChangingRetainedData(t *testing.T) {
 	body := `{"model":"actual","answers":{"billing":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0},"extra":"` + strings.Repeat("x", 9000) + `END-MARKER"}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fixtureWriteString(t, w, body) }))
 
 	defer server.Close()
 
@@ -245,7 +169,7 @@ func TestOptionalLogLevelsAreSnapshotsAndNeverInstallLogger(t *testing.T) {
 			return
 		}
 
-		io.WriteString(w, `{"models":[]}`)
+		fixtureWriteString(t, w, `{"models":[]}`)
 	}))
 	defer server.Close()
 
@@ -287,7 +211,9 @@ func TestOptionalLogLevelsAreSnapshotsAndNeverInstallLogger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.ListModels(context.Background(), typesafe.WithHeaders(http.Header{"X-Fail": {"true"}}))
+	if _, err := client.ListModels(context.Background(), typesafe.WithHeaders(http.Header{"X-Fail": {"true"}})); !errors.Is(err, typesafe.ErrPermission) {
+		t.Fatalf("expected HTTP forbidden with logging disabled: %v", err)
+	}
 
 	if logs.Len() != 0 {
 		t.Fatal("off log level emitted diagnostics")
@@ -298,7 +224,7 @@ func TestConcurrentLoggingKeepsResponseMetadataSeparate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Call", r.Header.Get("X-Call"))
 		w.Header().Set("x-typesafe-request-id", r.Header.Get("X-Call"))
-		io.WriteString(w, `{"models":[]}`)
+		fixtureWriteString(t, w, `{"models":[]}`)
 	}))
 	defer server.Close()
 
@@ -326,42 +252,22 @@ func TestConcurrentLoggingKeepsResponseMetadataSeparate(t *testing.T) {
 
 	workers.Wait()
 
-	decoder := json.NewDecoder(bytes.NewReader(logs.Bytes()))
-	responses := 0
-
-	for {
-		var record struct {
-			Message   string              `json:"msg"`
-			RequestID string              `json:"request_id"`
-			Headers   map[string][]string `json:"headers"`
-		}
-
-		if err := decoder.Decode(&record); err == io.EOF {
-			break
-		} else if err != nil {
-			t.Fatal(err)
-		}
-
-		if record.Message == "typesafe response" {
-			responses++
-
-			if len(record.Headers["X-Call"]) != 1 || record.Headers["X-Call"][0] != record.RequestID {
-				t.Fatalf("concurrent response metadata leaked: %+v", record)
-			}
-		}
-	}
-
-	if responses != 24 {
-		t.Fatalf("response log count: %d", responses)
-	}
+	assertConcurrentResponseLogs(t, logs.Bytes())
 }
 
 func TestLoggingPreservesActiveCancellation(t *testing.T) {
 	started := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("x-typesafe-request-id", "partial-id")
-		io.WriteString(w, `{"models":`)
-		w.(http.Flusher).Flush()
+
+		if !fixtureWriteString(t, w, `{"models":`) {
+			return
+		}
+
+		if !fixtureFlush(t, w) {
+			return
+		}
+
 		close(started)
 		<-r.Context().Done()
 	}))
@@ -403,9 +309,9 @@ func TestLoggingPreservesActiveCancellation(t *testing.T) {
 }
 
 func TestLoggingReportsSystemOneProtocolFailures(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-typesafe-request-id", "protocol-evaluation-id")
-		io.WriteString(w, `{"model":"actual","answers":{"other":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`)
+		fixtureWriteString(t, w, `{"model":"actual","answers":{"other":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`)
 	}))
 	defer server.Close()
 
@@ -419,5 +325,131 @@ func TestLoggingReportsSystemOneProtocolFailures(t *testing.T) {
 	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "sample", Questions: typesafe.Questions{"billing": typesafe.NoulQuestion{Instructions: "billing?"}}})
 	if !errors.Is(err, typesafe.ErrProtocol) || !strings.Contains(logs.String(), `"failure":"protocol"`) || !strings.Contains(logs.String(), "protocol-evaluation-id") {
 		t.Fatalf("protocol error diagnostics missing: %v %s", err, logs.String())
+	}
+}
+
+func assertLoggingOutput(t *testing.T, output string, bodies bool) {
+	t.Helper()
+
+	for _, expected := range []string{"/v1/systemone", "logging-id", `"status":200`, `"attempt":1`, `"duration"`} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("missing metadata %q: %s", expected, output)
+		}
+	}
+
+	for _, marker := range []string{"request-body-marker", "response-body-marker"} {
+		if strings.Contains(output, marker) != bodies {
+			t.Errorf("body opt-in not respected for %s: %s", marker, output)
+		}
+	}
+}
+
+func assertTransportFailureLogs(t *testing.T, logger *slog.Logger, baseURL string, logs *bytes.Buffer) {
+	t.Helper()
+
+	logs.Reset()
+
+	transport := logErrorTransport{}
+
+	client, err := typesafe.NewClient(typesafe.Config{APIKey: "private-key", BaseURL: baseURL, Logger: logger, HTTPClient: &http.Client{Transport: transport}, Retry: &typesafe.RetryPolicy{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.ListModels(context.Background())
+	if !errors.Is(err, typesafe.ErrTransport) {
+		t.Fatalf("expected transport error: %v", err)
+	}
+
+	if strings.Contains(logs.String(), "private-key") || strings.Contains(logs.String(), "transport-private-marker") || strings.Contains(err.Error(), "private-key") || !strings.Contains(logs.String(), `"failure":"transport"`) {
+		t.Fatalf("unsafe/missing transport diagnostics: %s", logs.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	logs.Reset()
+
+	_, err = client.ListModels(ctx)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(logs.String(), `"failure":"canceled"`) {
+		t.Fatalf("cancellation diagnostics missing: %v %s", err, logs.String())
+	}
+}
+
+func assertConcurrentResponseLogs(t *testing.T, data []byte) {
+	t.Helper()
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	responses := 0
+
+	for {
+		var record struct {
+			Message   string              `json:"msg"`
+			RequestID string              `json:"request_id"`
+			Headers   map[string][]string `json:"headers"`
+		}
+
+		if err := decoder.Decode(&record); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+
+		if record.Message == "typesafe response" {
+			responses++
+
+			if len(record.Headers["X-Call"]) != 1 || record.Headers["X-Call"][0] != record.RequestID {
+				t.Fatalf("concurrent response metadata leaked: %+v", record)
+			}
+		}
+	}
+
+	if responses != 24 {
+		t.Fatalf("response log count: %d", responses)
+	}
+}
+
+func exerciseLoggingOptIn(t *testing.T, baseURL string, configured, bodies bool) {
+	t.Helper()
+
+	var logs bytes.Buffer
+
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	original := slog.Default()
+
+	slog.SetDefault(logger)
+
+	defer slog.SetDefault(original)
+
+	config := typesafe.Config{APIKey: "test-key", BaseURL: baseURL, LogBodies: bodies}
+	if configured {
+		config.Logger = logger
+	}
+
+	client, err := typesafe.NewClient(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "request-body-marker", Questions: typesafe.Questions{"billing": typesafe.NoulQuestion{Instructions: "billing?"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !configured {
+		if logs.Len() != 0 {
+			t.Fatalf("SDK used global logging: %s", logs.String())
+		}
+
+		return
+	}
+
+	assertLoggingOutput(t, logs.String(), bodies)
+
+	if response.Model != "response-body-marker" || response.RequestID != "logging-id" {
+		t.Fatal("logging consumed response")
+	}
+
+	if slog.Default() != logger {
+		t.Fatal("SDK changed caller global logger")
 	}
 }

@@ -7,19 +7,32 @@ import (
 )
 
 var (
-	ErrValidation       = errors.New("typesafe: invalid input")
-	ErrProtocol         = errors.New("typesafe: invalid response")
-	ErrTransport        = errors.New("typesafe: transport failure")
-	ErrHTTP             = errors.New("typesafe: HTTP failure")
-	ErrBadRequest       = errors.New("typesafe: bad request")
-	ErrAuthentication   = errors.New("typesafe: authentication failed")
-	ErrPermission       = errors.New("typesafe: permission denied")
-	ErrNotFound         = errors.New("typesafe: not found")
+	// ErrValidation classifies invalid local input.
+	ErrValidation = errors.New("typesafe: invalid input")
+	// ErrProtocol classifies malformed successful HTTP responses.
+	ErrProtocol = errors.New("typesafe: invalid response")
+	// ErrTransport classifies connection, cancellation, deadline and body-read failures.
+	ErrTransport = errors.New("typesafe: transport failure")
+	// ErrHTTP classifies unsuccessful HTTP responses.
+	ErrHTTP = errors.New("typesafe: HTTP failure")
+	// ErrBadRequest classifies HTTP 400 responses.
+	ErrBadRequest = errors.New("typesafe: bad request")
+	// ErrAuthentication classifies HTTP 401 responses.
+	ErrAuthentication = errors.New("typesafe: authentication failed")
+	// ErrPermission classifies HTTP 403 responses.
+	ErrPermission = errors.New("typesafe: permission denied")
+	// ErrNotFound classifies HTTP 404 responses.
+	ErrNotFound = errors.New("typesafe: not found")
+	// ErrServerValidation classifies HTTP 422 responses.
 	ErrServerValidation = errors.New("typesafe: server validation failed")
-	ErrRateLimit        = errors.New("typesafe: rate limited")
-	ErrServer           = errors.New("typesafe: server failure")
-	ErrAnswerMissing    = errors.New("typesafe: answer missing")
-	ErrAnswerKind       = errors.New("typesafe: wrong answer kind")
+	// ErrRateLimit classifies HTTP 429 responses.
+	ErrRateLimit = errors.New("typesafe: rate limited")
+	// ErrServer classifies HTTP server failures.
+	ErrServer = errors.New("typesafe: server failure")
+	// ErrAnswerMissing classifies access to an absent named answer.
+	ErrAnswerMissing = errors.New("typesafe: answer missing")
+	// ErrAnswerKind classifies an answer accessor kind mismatch.
+	ErrAnswerKind = errors.New("typesafe: wrong answer kind")
 )
 
 // ValidationError identifies invalid local input, without including its value.
@@ -53,6 +66,8 @@ func (e *ProtocolError) Unwrap() error { return ErrProtocol }
 type HTTPError struct{ HTTPMetadata }
 
 func (e *HTTPError) Error() string { return fmt.Sprintf("typesafe: HTTP status %d", e.StatusCode) }
+
+// Is matches the generic HTTP category and the category for this status.
 func (e *HTTPError) Is(target error) bool {
 	if target == ErrHTTP {
 		return true
@@ -83,6 +98,8 @@ type TransportError struct {
 	Cause error
 }
 
-func (e *TransportError) Error() string        { return "typesafe: transport failure" }
-func (e *TransportError) Unwrap() error        { return e.Cause }
+func (e *TransportError) Error() string { return "typesafe: transport failure" }
+func (e *TransportError) Unwrap() error { return e.Cause }
+
+// Is matches ErrTransport while Unwrap retains the original cause.
 func (e *TransportError) Is(target error) bool { return target == ErrTransport }

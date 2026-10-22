@@ -2,8 +2,6 @@ package typesafe_test
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,13 +14,15 @@ func TestEnvironmentIsExplicitAndExplicitConfigWins(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct{ Model string }
 
-		json.NewDecoder(r.Body).Decode(&request)
+		if !fixtureDecode(t, r.Body, &request) {
+			return
+		}
 
 		if r.URL.Path != "/gateway/v1/systemone" || r.Header.Get("Authorization") != "Bearer explicit-key" || request.Model != "explicit-model" {
 			t.Errorf("unexpected environment-derived request: %s %s %s", r.URL.Path, r.Header.Get("Authorization"), request.Model)
 		}
 
-		io.WriteString(w, `{"model":"actual","answers":{"yes":{"type":"noul","noul":0.8}},"usage":{"input_tokens":0,"output_tokens":0}}`)
+		fixtureWriteString(t, w, `{"model":"actual","answers":{"yes":{"type":"noul","noul":0.8}},"usage":{"input_tokens":0,"output_tokens":0}}`)
 	}))
 	defer server.Close()
 

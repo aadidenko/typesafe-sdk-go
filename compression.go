@@ -11,6 +11,7 @@ import (
 // All modes retain uncompressed bodies below 1 KiB.
 type Compression string
 
+// Compression modes preserve uncompressed bodies below the compression threshold.
 const (
 	CompressionDefault Compression = ""
 	CompressionZstd    Compression = "zstd"
@@ -24,7 +25,7 @@ func validateCompression(mode Compression) error {
 		return nil
 	}
 
-	return &ValidationError{"compression", "must be default, zstd, gzip or none"}
+	return &ValidationError{Field: "compression", Message: "must be default, zstd, gzip or none"}
 }
 
 // WithCompression overrides compression for one call without changing defaults.
@@ -47,7 +48,7 @@ const maximumRequestBody = 32 << 20
 
 func compressRequest(body []byte, mode Compression) ([]byte, string, error) {
 	if len(body) > maximumRequestBody {
-		return nil, "", &ValidationError{"request", "body must not exceed 32 MiB before compression"}
+		return nil, "", &ValidationError{Field: "request", Message: "body must not exceed 32 MiB before compression"}
 	}
 
 	if len(body) < compressionThreshold || mode == CompressionNone {
@@ -60,11 +61,11 @@ func compressRequest(body []byte, mode Compression) ([]byte, string, error) {
 		encoder := gzip.NewWriter(&buffer)
 
 		if _, err := encoder.Write(body); err != nil {
-			return nil, "", &ValidationError{"compression", "cannot encode gzip body"}
+			return nil, "", &ValidationError{Field: "compression", Message: "cannot encode gzip body"}
 		}
 
 		if err := encoder.Close(); err != nil {
-			return nil, "", &ValidationError{"compression", "cannot finish gzip body"}
+			return nil, "", &ValidationError{Field: "compression", Message: "cannot finish gzip body"}
 		}
 
 		return checkedCompressedBody(buffer.Bytes(), "gzip")
@@ -72,16 +73,16 @@ func compressRequest(body []byte, mode Compression) ([]byte, string, error) {
 
 	encoder, err := zstd.NewWriter(nil, zstd.WithWindowSize(8<<20), zstd.WithSingleSegment(false), zstd.WithEncoderConcurrency(1))
 	if err != nil {
-		return nil, "", &ValidationError{"compression", "cannot initialize zstd encoder"}
+		return nil, "", &ValidationError{Field: "compression", Message: "cannot initialize zstd encoder"}
 	}
-	defer encoder.Close()
+	defer encoder.Close() //nolint:errcheck // EncodeAll has no streaming output; cleanup cannot invalidate its completed in-memory bytes.
 
 	return checkedCompressedBody(encoder.EncodeAll(body, nil), "zstd")
 }
 
 func checkedCompressedBody(body []byte, encoding string) ([]byte, string, error) {
 	if len(body) > maximumRequestBody {
-		return nil, "", &ValidationError{"request", "compressed body must not exceed 32 MiB"}
+		return nil, "", &ValidationError{Field: "request", Message: "compressed body must not exceed 32 MiB"}
 	}
 
 	return body, encoding, nil
