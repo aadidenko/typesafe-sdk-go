@@ -52,6 +52,42 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 
 	defer transport.CloseIdleConnections() // The application owns this resource.
 
+	config := exampleConfig(transport, compression, diagnostics, bodies)
+
+	client, err := typesafe.NewClient(config)
+	if err != nil {
+		return err
+	}
+
+	selected, err := selectModel(ctx, client, config.Model)
+	if err != nil {
+		return err
+	}
+
+	// Model metadata has no image-capability flag. Select an image-capable model
+	// explicitly with TYPESAFE_DEFAULT_MODEL; the SDK never switches it for media.
+	photo, err := loadImage(imagePath)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.SystemOne(ctx, imageRequest(photo), typesafe.WithModel(selected), typesafe.WithHeaders(http.Header{"X-Application": {"complete-example"}}))
+	if err != nil {
+		return err
+	}
+
+	if err := printTypedAnswers(response); err != nil {
+		return err
+	}
+
+	if err := printApplicationAnswers(response); err != nil {
+		return err
+	}
+
+	return printDecodedResponse(response)
+}
+
+func exampleConfig(transport *http.Transport, compression typesafe.Compression, diagnostics, bodies bool) typesafe.Config {
 	config := typesafe.LoadEnv(typesafe.Config{HTTPClient: &http.Client{Transport: transport}, Compression: compression, ExperimentalImages: true})
 	if diagnostics {
 		config.Logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -62,48 +98,44 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 		config.Model = typesafe.DefaultModel
 	}
 
-	client, err := typesafe.NewClient(config)
-	if err != nil {
-		return err
-	}
+	return config
+}
 
+func selectModel(ctx context.Context, client *typesafe.Client, configured string) (string, error) {
 	models, err := client.ListModels(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	selected := ""
 
 	for _, model := range models.Models {
 		if _, err := fmt.Printf("Available: %s (%s): %s\n", model.Name, model.ReleaseDate, model.Description); err != nil {
-			return err
+			return "", err
 		}
 
-		if model.Name == config.Model {
+		if model.Name == configured {
 			selected = model.Name
 		}
 	}
 
 	if selected == "" {
-		return fmt.Errorf("configured model is absent from account model discovery")
+		return "", fmt.Errorf("configured model is absent from account model discovery")
 	}
 
-	// Model metadata has no image-capability flag. Select an image-capable model
-	// explicitly with TYPESAFE_DEFAULT_MODEL; the SDK never switches it for media.
-	photo, err := loadImage(imagePath)
-	if err != nil {
-		return err
-	}
+	return selected, nil
+}
 
+func imageRequest(photo typesafe.Image) typesafe.SystemOneRequest {
 	var assets typesafe.Assets
 
 	reference := assets.Add(photo)
 
-	response, err := client.SystemOne(ctx, typesafe.SystemOneRequest{
+	return typesafe.SystemOneRequest{
 		State: struct {
 			Image   string `json:"image"`
 			Context []any  `json:"context"`
-		}{reference, []any{"Inspect the rectangle in " + reference, nil}},
+		}{Image: reference, Context: []any{"Inspect the rectangle in " + reference, nil}},
 		Assets: assets,
 		Questions: typesafe.Questions{
 			"visible":  typesafe.NoulQuestion{Instructions: "Is a red rectangle visible?", Criteria: &typesafe.NoulCriteria{True: "A red rectangle is present", False: "No red rectangle"}},
@@ -111,11 +143,10 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 			"size":     typesafe.ScoreQuestion{Instructions: "How much of the image does the rectangle occupy?", Criteria: []any{"A small fraction", "About half", "Almost all"}},
 			"location": typesafe.BoxQuestion{Instructions: "Locate the red rectangle in " + reference},
 		},
-	}, typesafe.WithModel(selected), typesafe.WithHeaders(http.Header{"X-Application": {"complete-example"}}))
-	if err != nil {
-		return err
 	}
+}
 
+func printTypedAnswers(response *typesafe.SystemOneResponse) error {
 	visible, err := response.Noul("visible")
 	if err != nil {
 		return err
@@ -149,10 +180,12 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 		confidence = fmt.Sprintf("%.3f", *box.Confidence)
 	}
 
-	if _, err := fmt.Printf("Box %+v, confidence %s; Box Answers: %d\n", box.Box, confidence, len(response.AnswersByKind("box"))); err != nil {
-		return err
-	}
+	_, err = fmt.Printf("Box %+v, confidence %s; Box Answers: %d\n", box.Box, confidence, len(response.AnswersByKind("box")))
 
+	return err
+}
+
+func printApplicationAnswers(response *typesafe.SystemOneResponse) error {
 	var app struct {
 		Visible struct {
 			Probability float64 `json:"noul"`
@@ -170,10 +203,12 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 	}
 
 	// Domain validation and thresholds belong to the application, explicitly.
-	if _, err := fmt.Printf("Application decode: visible %.3f, color %s, size %.3f\n", app.Visible.Probability, app.Color.Choice, app.Size.Score); err != nil {
-		return err
-	}
+	_, err := fmt.Printf("Application decode: visible %.3f, color %s, size %.3f\n", app.Visible.Probability, app.Color.Choice, app.Size.Score)
 
+	return err
+}
+
+func printDecodedResponse(response *typesafe.SystemOneResponse) error {
 	var full struct {
 		Model string
 		Usage typesafe.Usage
@@ -183,11 +218,9 @@ func run(ctx context.Context, imagePath string, compression typesafe.Compression
 		return err
 	}
 
-	if _, err := fmt.Printf("Actual model %s, usage %+v, HTTP %d, request ID %s, retained bytes %d\n", full.Model, full.Usage, response.StatusCode, response.RequestID, len(response.RawBody)); err != nil {
-		return err
-	}
+	_, err := fmt.Printf("Actual model %s, usage %+v, HTTP %d, request ID %s, retained bytes %d\n", full.Model, full.Usage, response.StatusCode, response.RequestID, len(response.RawBody))
 
-	return nil
+	return err
 }
 
 func loadImage(path string) (typesafe.Image, error) {
