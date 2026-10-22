@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible problem in the Go SDK.
+title: "Bug: "
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic data. Do not include API keys, authorization headers, or private request/response bodies.
+        For security vulnerabilities, use [private reporting](https://github.com/aadidenko/typesafe-sdk-go/security/advisories/new).
+  - type: input
+    id: version
+    attributes:
+      label: SDK version or commit
+      description: Include the exact version or commit from your application.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Go version and operating system
+      placeholder: go version; OS and architecture
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include code and steps using synthetic data. Prefer a local HTTP fixture when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized errors or output.
+    validations:
+      required: true

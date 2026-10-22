@@ -1,0 +1,19 @@
+# Local credentials; a sanitized template may be committed deliberately.
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+
+# Local build and test output.
+/bin/
+/dist/
+/coverage/
+/coverage.out
+/coverage.html
+*.test
+*.prof
+
+# Operating system files.
+.DS_Store
