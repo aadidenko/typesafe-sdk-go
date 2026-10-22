@@ -438,13 +438,14 @@ func TestMultipartRetriesReplayPreparedFileSnapshot(t *testing.T) {
 			originalBody = body
 			originalContentType = r.Header.Get("Content-Type")
 
+			w.WriteHeader(http.StatusServiceUnavailable)
+
+			// Keep the failure buffered until mutation completes, before the retry can start.
 			if err := os.WriteFile(path, []byte("modified and no longer an image"), 0o600); err != nil {
 				t.Error(err)
 
 				return
 			}
-
-			w.WriteHeader(503)
 
 			return
 		}
