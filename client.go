@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -18,8 +19,10 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
-	APIKey, BaseURL, Model      string
-	HTTPClient                  *http.Client
+	APIKey, BaseURL, Model string
+	HTTPClient             *http.Client
+	// LogLevel optionally filters a supplied logger; nil preserves its own level.
+	LogLevel                    *slog.Level
 	Headers                     http.Header
 	AttemptTimeout, CallTimeout time.Duration
 }
@@ -48,8 +51,11 @@ func WithModel(model string) CallOption {
 	}
 }
 func WithHeaders(headers http.Header) CallOption {
-	snapshot := headers.Clone()
+	snapshot, err := copyHeaders(headers)
 	return func(s *callSettings) error {
+		if err != nil {
+			return err
+		}
 		for k, v := range snapshot {
 			s.headers[k] = append([]string(nil), v...)
 		}
@@ -68,18 +74,19 @@ func WithTimeouts(attempt, call time.Duration) CallOption {
 }
 
 func NewClient(config Config) (*Client, error) {
+	config.APIKey = strings.TrimSpace(config.APIKey)
 	if strings.TrimSpace(config.APIKey) == "" || strings.IndexFunc(config.APIKey, func(r rune) bool { return r <= 32 || r >= 127 }) >= 0 {
 		return nil, &ValidationError{"api_key", "must be a nonempty token without whitespace or control characters"}
 	}
 	if config.BaseURL == "" {
-		config.BaseURL = "https://api.typesafe.ai"
+		config.BaseURL = DefaultBaseURL
 	}
 	base, err := url.Parse(config.BaseURL)
 	if err != nil || base == nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.RawQuery != "" || base.Fragment != "" || base.User != nil {
 		return nil, &ValidationError{"base_url", "must be an absolute HTTP(S) URL without credentials, query or fragment"}
 	}
 	if config.Model == "" {
-		config.Model = "jev-latest"
+		config.Model = DefaultModel
 	}
 	if strings.TrimSpace(config.Model) == "" {
 		return nil, &ValidationError{"model", "must not be blank"}
@@ -88,19 +95,23 @@ func NewClient(config Config) (*Client, error) {
 		return nil, &ValidationError{"timeouts", "must not be negative"}
 	}
 	if config.AttemptTimeout == 0 {
-		config.AttemptTimeout = 10 * time.Second
+		config.AttemptTimeout = DefaultAttemptTimeout
 	}
 	if config.CallTimeout == 0 {
-		config.CallTimeout = 30 * time.Second
+		config.CallTimeout = DefaultCallTimeout
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{}
 	}
-	return &Client{config.APIKey, strings.TrimRight(base.String(), "/"), config.Model, config.HTTPClient, config.Headers.Clone(), config.AttemptTimeout, config.CallTimeout}, nil
+	headers, err := copyHeaders(config.Headers)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
-	s := callSettings{c.model, c.headers.Clone(), c.attemptTimeout, c.callTimeout}
+	s := callSettings{model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
 	if s.headers == nil {
 		s.headers = make(http.Header)
 	}

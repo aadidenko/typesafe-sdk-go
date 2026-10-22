@@ -33,6 +33,11 @@ structs, maps, and slices. Nested nulls are preserved. Scalar top-level content,
 unencodable values, and nonfinite numbers produce a local `ValidationError`
 before HTTP traffic.
 
+Model discovery is available through `client.ListModels(ctx, options...)`. It
+returns names, descriptions, release dates and retained HTTP metadata. The
+[configuration guide](docs/configuration.md) and [runnable model example](examples/models/main.go)
+cover opt-in `LoadEnv`, gateways and caller-owned HTTP clients.
+
 Construction reads no environment variables. `Config` accepts an API key, base
 URL, default model, custom headers, attempt timeout, call timeout, and standard
 `*http.Client`. Defaults are `https://api.typesafe.ai`, `jev-latest`, 10 seconds
@@ -60,8 +65,8 @@ headers and application bodies. The SDK emits no logs by default.
 
 This implementation slice delivers Noul evaluations and the transport/validation
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
-Choice, Score, Box, model discovery, custom decoding, images, retries,
-compression, environment helpers, extension fields, and optional diagnostics
+Choice, Score, Box, custom decoding, images, retries,
+compression, extension fields, and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 
 Deterministic local HTTP tests need no credentials or paid requests:
