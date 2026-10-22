@@ -20,6 +20,7 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
+	Compression Compression
 	// Logger enables SDK diagnostics without changing global logging.
 	Logger *slog.Logger
 	// LogBodies separately opts into bounded wire bodies, which may contain sensitive content.
@@ -34,6 +35,7 @@ type Config struct {
 	AttemptTimeout, CallTimeout time.Duration
 }
 type Client struct {
+	compression                 Compression
 	logger                      *slog.Logger
 	logBodies                   bool
 	logLevel                    *slog.Level
@@ -45,9 +47,11 @@ type Client struct {
 	attemptTimeout, callTimeout time.Duration
 }
 type callSettings struct {
+	compression                 Compression
 	retry                       RetryPolicy
 	experimentalImages          bool
 	contentType                 string
+	contentEncoding             string
 	model                       string
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
@@ -94,6 +98,9 @@ func WithTimeouts(attempt, call time.Duration) CallOption {
 }
 
 func NewClient(config Config) (*Client, error) {
+	if err := validateCompression(config.Compression); err != nil {
+		return nil, err
+	}
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	if strings.TrimSpace(config.APIKey) == "" || strings.IndexFunc(config.APIKey, func(r rune) bool { return r <= 32 || r >= 127 }) >= 0 {
 		return nil, &ValidationError{"api_key", "must be a nonempty token without whitespace or control characters"}
@@ -140,11 +147,11 @@ func NewClient(config Config) (*Client, error) {
 		level := *logLevel
 		logLevel = &level
 	}
-	return &Client{logger: config.Logger, logBodies: config.LogBodies, logLevel: logLevel, retry: retry, experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
+	return &Client{compression: config.Compression, logger: config.Logger, logBodies: config.LogBodies, logLevel: logLevel, retry: retry, experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
-	s := callSettings{retry: c.retry, experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
+	s := callSettings{compression: c.compression, retry: c.retry, experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
 	if s.headers == nil {
 		s.headers = make(http.Header)
 	}
@@ -238,6 +245,9 @@ func (c *Client) doAttempt(ctx context.Context, method, path string, body []byte
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", s.contentType)
+	}
+	if s.contentEncoding != "" {
+		req.Header.Set("Content-Encoding", s.contentEncoding)
 	}
 	if s.experimentalImages {
 		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")

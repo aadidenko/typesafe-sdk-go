@@ -231,7 +231,7 @@ func TestIndividualChoiceAndScoreBoundaryCardinalities(t *testing.T) {
 					json.NewEncoder(w).Encode(map[string]any{"model": "actual", "answers": map[string]any{"rating": answer}, "usage": map[string]int{"input_tokens": 0, "output_tokens": 0}})
 				}))
 				defer server.Close()
-				client, _ := typesafe.NewClient(typesafe.Config{APIKey: "test", BaseURL: server.URL})
+				client, _ := typesafe.NewClient(typesafe.Config{APIKey: "test", BaseURL: server.URL, Compression: typesafe.CompressionNone})
 				response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "state", Questions: typesafe.Questions{"rating": question}})
 				if err != nil {
 					t.Fatal(err)

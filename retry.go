@@ -167,6 +167,14 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 	total, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
 	var last error
+	if total.Err() != nil {
+		return meta, retryContextError(total, meta, nil)
+	}
+	var err error
+	body, s.contentEncoding, err = compressRequest(body, s.compression)
+	if err != nil {
+		return meta, err
+	}
 	for retryNumber := 0; ; retryNumber++ {
 		if total.Err() != nil {
 			return meta, retryContextError(total, meta, last)

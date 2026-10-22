@@ -17,6 +17,8 @@ SDK parity.
 | Future Answers ignored by Python parsed model | Direct `UnknownAnswer` discriminator/raw payload preservation; additional unknown Answers retained | `TestFutureQuestionAndUnknownAnswersRoundTrip` |
 | Missing or mismatched requested Answer tolerated by Python | Protocol errors with retained HTTP data; matching future RawQuestion can receive UnknownAnswer | `TestFutureQuestionStillRequiresMatchingNamedAnswer`, existing requested-answer contract tests |
 | `extra_body` last-write-wins merge | ExtraBody transmits unrelated future fields; collision with model/state/questions/assets is a local validation error | `TestExtraBodyAddsFutureFieldsWithoutReplacingCoreRequest`, `TestExtraBodyRejectsCoreCollisionsAndInvalidValuesBeforeHTTP` |
+| Automatic zstd at complete prepared body >= 1 KiB | Zero `Config.Compression` selects available pure-Go zstd; JSON and complete multipart compressed once and replayed identically, bounded to provider's 8 MiB window and 32 MiB logical/encoded sizes | `TestDefaultCompressionThreshold`, `TestMultipartCompressionThresholdUsesCompleteBody`, `TestZstdWindowSupportsLogicalBodiesLargerThanEightMiB`, `TestLogicalBodyLimitIsNotExpandedByCompression`, `TestCompressedBodyAlsoRespectsProviderLimit` |
+| Python compression opt-out; optional zstd dependency | `CompressionNone`, explicit `CompressionZstd`, client/call overrides; standard-library `CompressionGzip` is an intentional addition, no optional codec installation or cgo | `TestCompressionModesAndCallOverrides`, `TestCompressedJSONAndMultipartRetriesReplayExactBytes`, examples/compression |
 
 ## Diagnostics slice
 
