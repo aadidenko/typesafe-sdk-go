@@ -18,7 +18,7 @@ func (q BoxQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	body, err := json.Marshal(struct {
 		Type         string          `json:"type"`
 		Instructions json.RawMessage `json:"instructions,omitempty"`
-	}{"box", instructions})
+	}{Type: "box", Instructions: instructions})
 
 	return "box", body, err
 }
@@ -37,8 +37,10 @@ type BoxAnswer struct {
 	Confidence *float64 `json:"confidence"`
 }
 
+// Kind identifies a Box Answer.
 func (BoxAnswer) Kind() string { return "box" }
 
+// Box returns the named Box Answer, or an error for a missing name or different kind.
 func (r *SystemOneResponse) Box(name string) (BoxAnswer, error) {
 	value, ok := r.Answers[name]
 	if !ok {
@@ -54,36 +56,52 @@ func (r *SystemOneResponse) Box(name string) (BoxAnswer, error) {
 }
 
 func parseBox(object map[string]json.RawMessage, field string, meta HTTPMetadata) (BoxAnswer, error) {
-	fail := func(path string) (BoxAnswer, error) {
-		return BoxAnswer{}, &ProtocolError{meta, field + path, "required normalized number from 0 to 1"}
+	box, err := parseBoxCoordinates(object["box"], field, meta)
+	if err != nil {
+		return BoxAnswer{}, err
 	}
 
+	confidence, err := parseBoxConfidence(object, field, meta)
+	if err != nil {
+		return BoxAnswer{}, err
+	}
+
+	return BoxAnswer{Box: box, Confidence: confidence}, nil
+}
+
+func parseBoxCoordinates(raw json.RawMessage, field string, meta HTTPMetadata) (Box, error) {
 	var coordinates map[string]json.RawMessage
 
-	if err := json.Unmarshal(object["box"], &coordinates); err != nil || coordinates == nil {
-		return fail(".box")
+	if err := json.Unmarshal(raw, &coordinates); err != nil || coordinates == nil {
+		return Box{}, protocolField(meta, field+".box", "required normalized number from 0 to 1")
 	}
 
-	var result BoxAnswer
+	var box Box
 
-	for name, dest := range map[string]*float64{"top": &result.Box.Top, "bottom": &result.Box.Bottom, "left": &result.Box.Left, "right": &result.Box.Right} {
+	for name, destination := range map[string]*float64{"top": &box.Top, "bottom": &box.Bottom, "left": &box.Left, "right": &box.Right} {
 		var value *float64
 
 		if err := json.Unmarshal(coordinates[name], &value); err != nil || value == nil || *value < 0 || *value > 1 {
-			return fail(".box." + name)
+			return Box{}, protocolField(meta, field+".box."+name, "required normalized number from 0 to 1")
 		}
 
-		*dest = *value
+		*destination = *value
 	}
 
+	return box, nil
+}
+
+func parseBoxConfidence(object map[string]json.RawMessage, field string, meta HTTPMetadata) (*float64, error) {
 	raw, exists := object["confidence"]
 	if !exists {
-		return fail(".confidence")
+		return nil, protocolField(meta, field+".confidence", "required normalized number from 0 to 1")
 	}
 
-	if err := json.Unmarshal(raw, &result.Confidence); err != nil || (result.Confidence != nil && (*result.Confidence < 0 || *result.Confidence > 1)) {
-		return fail(".confidence")
+	var confidence *float64
+
+	if err := json.Unmarshal(raw, &confidence); err != nil || (confidence != nil && (*confidence < 0 || *confidence > 1)) {
+		return nil, protocolField(meta, field+".confidence", "required normalized number from 0 to 1")
 	}
 
-	return result, nil
+	return confidence, nil
 }
