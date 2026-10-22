@@ -33,6 +33,11 @@ structs, maps, and slices. Nested nulls are preserved. Scalar top-level content,
 unencodable values, and nonfinite numbers produce a local `ValidationError`
 before HTTP traffic.
 
+Model discovery is available through `client.ListModels(ctx, options...)`. It
+returns names, descriptions, release dates and retained HTTP metadata. The
+[configuration guide](docs/configuration.md) and [runnable model example](examples/models/main.go)
+cover opt-in `LoadEnv`, gateways and caller-owned HTTP clients.
+
 Construction reads no environment variables. `Config` accepts an API key, base
 URL, default model, custom headers, attempt timeout, call timeout, and standard
 `*http.Client`. Defaults are `https://api.typesafe.ai`, `jev-latest`, 10 seconds
@@ -62,10 +67,12 @@ status-category sentinels include `ErrAuthentication`, `ErrPermission`,
 available through the error chain. Routine error formatting excludes API keys,
 headers and application bodies. The SDK emits no logs by default.
 
-This implementation slice delivers Noul evaluations and the transport/validation
+This implementation slice delivers Noul, Choice, Score, and Box evaluations, explicit image assets, and the transport/validation
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
-Choice, Score, Box, model discovery, images, retries,
-compression, environment helpers and optional diagnostics
+See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
+classification, scoring, and the runnable examples. Model discovery, environment
+configuration, custom decoding and protected extension fields are also available.
+Retries, compression, and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 
 Deterministic local HTTP tests need no credentials or paid requests:
@@ -80,3 +87,46 @@ CI runs those checks and formatting on minimum Go 1.25.0. The checked-in
 [OpenAPI snapshot](docs/reference/typesafe-openapi.json) defines the HTTP
 contract. Local tests establish SDK behavior against that contract; they do not
 establish live provider acceptance or model quality.
+
+### Experimental images and Box
+
+Images and Box questions require `Config.ExperimentalImages: true` or
+`WithExperimentalImages(true)` on the call. This sends
+`TypeSafe-Danger-Zone-Images: true` and preserves your selected model. A per-call
+`WithExperimentalImages(false)` disables a client's opt-in. Calls using images
+or Box without the flag fail before sending a request.
+
+Use `ImageFromBytes`, `ImageFromFile`, `ImageFromBase64`, or
+`ImageFromGoImage(img, "png")` (`"jpeg"` and `"jpg"` are also accepted) to create
+an immutable PNG/JPEG source snapshot. File data is read at construction;
+changing the original file or byte slice does not change an Image. Image
+preparation does not resize images or correct their orientation.
+
+```go
+photo, err := typesafe.ImageFromFile("photo.png")
+if err != nil { /* handle local image error */ }
+var assets typesafe.Assets
+ref := assets.Add(photo)
+response, err := client.SystemOne(ctx, typesafe.SystemOneRequest{
+    State: map[string]any{"image": ref},
+    Assets: assets,
+    Questions: typesafe.Questions{
+        "location": typesafe.BoxQuestion{Instructions: "Locate the subject in " + ref},
+    },
+}, typesafe.WithExperimentalImages(true))
+```
+
+For a caller-chosen reference, use `Assets{"photo": photo}` and place `"photo"`
+in your content. References remain ordinary string values, including within
+longer strings or nested State, instructions, and criteria. There is no automatic
+image discovery. Each registered reference uploads once, even if used many
+times. Distinct registered names receive distinct image parts. Assets belong to
+one request; the client does not retain an attachment context.
+
+Image requests send a multipart body with a JSON `request` part followed by raw
+PNG/JPEG parts. Calls without image Assets remain JSON requests, including Box
+calls. The complete body is prepared before transport and can be replayed without
+reading image sources again. `response.Box(name)` returns normalized edge
+coordinates and a `*float64` Confidence: nil represents the model's explicit
+null confidence; a missing confidence is a protocol error. See
+[the compiling image example](examples/images/main.go).

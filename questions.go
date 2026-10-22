@@ -19,6 +19,7 @@ type SystemOneRequest struct {
 	// ExtraBody adds future top-level fields; model, state, questions and assets
 	// are reserved and must be set through the typed request or call options.
 	ExtraBody map[string]any
+	Assets    Assets
 }
 
 // NoulCriteria explains what counts as true or false. Nil descriptions are omitted.

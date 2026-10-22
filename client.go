@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -18,18 +19,24 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
-	APIKey, BaseURL, Model      string
-	HTTPClient                  *http.Client
+	ExperimentalImages     bool
+	APIKey, BaseURL, Model string
+	HTTPClient             *http.Client
+	// LogLevel optionally filters a supplied logger; nil preserves its own level.
+	LogLevel                    *slog.Level
 	Headers                     http.Header
 	AttemptTimeout, CallTimeout time.Duration
 }
 type Client struct {
+	experimentalImages          bool
 	apiKey, baseURL, model      string
 	httpClient                  *http.Client
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
 }
 type callSettings struct {
+	experimentalImages          bool
+	contentType                 string
 	model                       string
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
@@ -37,6 +44,11 @@ type callSettings struct {
 
 // CallOption configures one call without changing client defaults.
 type CallOption func(*callSettings) error
+
+// WithExperimentalImages explicitly enables or disables experimental media for one call.
+func WithExperimentalImages(enabled bool) CallOption {
+	return func(s *callSettings) error { s.experimentalImages = enabled; return nil }
+}
 
 func WithModel(model string) CallOption {
 	return func(s *callSettings) error {
@@ -48,8 +60,11 @@ func WithModel(model string) CallOption {
 	}
 }
 func WithHeaders(headers http.Header) CallOption {
-	snapshot := headers.Clone()
+	snapshot, err := copyHeaders(headers)
 	return func(s *callSettings) error {
+		if err != nil {
+			return err
+		}
 		for k, v := range snapshot {
 			s.headers[k] = append([]string(nil), v...)
 		}
@@ -68,18 +83,19 @@ func WithTimeouts(attempt, call time.Duration) CallOption {
 }
 
 func NewClient(config Config) (*Client, error) {
+	config.APIKey = strings.TrimSpace(config.APIKey)
 	if strings.TrimSpace(config.APIKey) == "" || strings.IndexFunc(config.APIKey, func(r rune) bool { return r <= 32 || r >= 127 }) >= 0 {
 		return nil, &ValidationError{"api_key", "must be a nonempty token without whitespace or control characters"}
 	}
 	if config.BaseURL == "" {
-		config.BaseURL = "https://api.typesafe.ai"
+		config.BaseURL = DefaultBaseURL
 	}
 	base, err := url.Parse(config.BaseURL)
 	if err != nil || base == nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.RawQuery != "" || base.Fragment != "" || base.User != nil {
 		return nil, &ValidationError{"base_url", "must be an absolute HTTP(S) URL without credentials, query or fragment"}
 	}
 	if config.Model == "" {
-		config.Model = "jev-latest"
+		config.Model = DefaultModel
 	}
 	if strings.TrimSpace(config.Model) == "" {
 		return nil, &ValidationError{"model", "must not be blank"}
@@ -88,19 +104,23 @@ func NewClient(config Config) (*Client, error) {
 		return nil, &ValidationError{"timeouts", "must not be negative"}
 	}
 	if config.AttemptTimeout == 0 {
-		config.AttemptTimeout = 10 * time.Second
+		config.AttemptTimeout = DefaultAttemptTimeout
 	}
 	if config.CallTimeout == 0 {
-		config.CallTimeout = 30 * time.Second
+		config.CallTimeout = DefaultCallTimeout
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{}
 	}
-	return &Client{config.APIKey, strings.TrimRight(base.String(), "/"), config.Model, config.HTTPClient, config.Headers.Clone(), config.AttemptTimeout, config.CallTimeout}, nil
+	headers, err := copyHeaders(config.Headers)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: headers, attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
-	s := callSettings{c.model, c.headers.Clone(), c.attemptTimeout, c.callTimeout}
+	s := callSettings{experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
 	if s.headers == nil {
 		s.headers = make(http.Header)
 	}
@@ -120,6 +140,9 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	if err != nil {
 		return nil, err
 	}
+	if len(request.Assets) > 0 && !s.experimentalImages {
+		return nil, &ValidationError{"assets", "requires experimental images opt-in"}
+	}
 	state, err := encodeContent(request.State, "state", false)
 	if err != nil {
 		return nil, err
@@ -137,6 +160,9 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 		if err != nil {
 			return nil, err
 		}
+		if kind == "box" && !s.experimentalImages {
+			return nil, &ValidationError{"questions." + name, "Box requires experimental images opt-in"}
+		}
 		questions[name] = body
 		requested[name] = kind
 	}
@@ -152,11 +178,22 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	if err != nil {
 		return nil, &ValidationError{"request", "must be JSON-encodable"}
 	}
+	body, s.contentType, err = prepareAssets(body, request.Assets)
+	if err != nil {
+		return nil, err
+	}
 	meta, err := c.do(ctx, http.MethodPost, "/v1/systemone", body, s)
 	if err != nil {
 		return nil, err
 	}
-	return parseSystemOne(meta, requested)
+	response, err := parseSystemOne(meta, requested)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAnsweredQuestions(response, questions); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte, s callSettings) (HTTPMetadata, error) {
@@ -176,7 +213,10 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 	req.Header.Set("X-TypeSafe-Retry-Count", "0")
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", s.contentType)
+	}
+	if s.experimentalImages {
+		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")
 	}
 	response, err := c.httpClient.Do(req)
 	if err != nil {
