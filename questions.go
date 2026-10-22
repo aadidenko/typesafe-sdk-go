@@ -16,6 +16,7 @@ type Questions map[string]Question
 type SystemOneRequest struct {
 	State     any
 	Questions Questions
+	Assets    Assets
 }
 
 // NoulCriteria explains what counts as true or false. Nil descriptions are omitted.

@@ -112,6 +112,12 @@ func parseSystemOne(meta HTTPMetadata, requested map[string]string) (*SystemOneR
 				return nil, err
 			}
 			result.Answers[name] = answer
+		} else if kind == "box" {
+			value, err := parseBox(object, field, meta)
+			if err != nil {
+				return nil, err
+			}
+			result.Answers[name] = value
 		} else {
 			result.Answers[name] = UnknownAnswer{kind, append(json.RawMessage(nil), raw...)}
 		}
