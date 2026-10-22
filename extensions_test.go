@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -19,6 +18,8 @@ func TestFutureQuestionAndUnknownAnswersRoundTrip(t *testing.T) {
 
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
+
+			return
 		}
 
 		var question struct {
@@ -29,31 +30,26 @@ func TestFutureQuestionAndUnknownAnswersRoundTrip(t *testing.T) {
 
 		if err := json.Unmarshal(body.Questions["future"], &question); err != nil {
 			t.Error(err)
+
+			return
 		}
 
 		if question.Type != "future-ranking" || len(question.Options) != 2 || question.Nested["null"] != nil {
 			t.Errorf("future question changed: %+v", question)
 		}
 
-		io.WriteString(w, `{"model":"actual","answers":{"future":{"type":"future-ranking","ranking":[2,1]},"another":{"type":"new-additional-kind","data":true}},"usage":{"input_tokens":0,"output_tokens":0},"future_top":42}`)
+		fixtureWriteString(t, w, `{"model":"actual","answers":{"future":{"type":"future-ranking","ranking":[2,1]},"another":{"type":"new-additional-kind","data":true}},"usage":{"input_tokens":0,"output_tokens":0},"future_top":42}`)
 	}))
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 
 	response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "sample", Questions: typesafe.Questions{"future": typesafe.RawQuestion(`{"type":"future-ranking","options":[{"arbitrary":true},null],"nested":{"null":null}}`)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	unknown, ok := response.Answers["future"].(typesafe.UnknownAnswer)
-	if !ok || unknown.Type != "future-ranking" || string(unknown.Raw) != `{"type":"future-ranking","ranking":[2,1]}` {
-		t.Fatalf("future answer lost: %+v", response.Answers)
-	}
-
-	if additional, ok := response.Answers["another"].(typesafe.UnknownAnswer); !ok || additional.Type != "new-additional-kind" {
-		t.Fatal("additional future answer lost")
-	}
+	assertFutureAnswers(t, response)
 
 	var full struct {
 		FutureTop int `json:"future_top"`
@@ -67,11 +63,15 @@ func TestFutureQuestionAndUnknownAnswersRoundTrip(t *testing.T) {
 func TestRawQuestionRejectsInvalidEnvelopeAndKnownKindsBeforeHTTP(t *testing.T) {
 	var requests atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); io.WriteString(w, validResponse) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+
+		fixtureWriteString(t, w, validResponse)
+	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 
 	for _, raw := range []string{``, `{`, `null`, `[]`, `"text"`, `{}`, `{"type":null}`, `{"type":12}`, `{"type":" "}`, `{"type":"noul"}`, `{"type":"choice"}`, `{"type":"score"}`, `{"type":"box"}`} {
 		t.Run(raw, func(t *testing.T) {
@@ -90,12 +90,12 @@ func TestRawQuestionRejectsInvalidEnvelopeAndKnownKindsBeforeHTTP(t *testing.T) 
 func TestFutureQuestionStillRequiresMatchingNamedAnswer(t *testing.T) {
 	for _, answers := range []string{`{"another":{"type":"future-ranking"}}`, `{"future":{"type":"different"}}`, `{"future":{"type":"noul","noul":0.5}}`} {
 		t.Run(answers, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				io.WriteString(w, `{"model":"actual","answers":`+answers+`,"usage":{"input_tokens":0,"output_tokens":0}}`)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fixtureWriteString(t, w, `{"model":"actual","answers":`+answers+`,"usage":{"input_tokens":0,"output_tokens":0}}`)
 			}))
 			defer server.Close()
 
-			client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+			client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 			_, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "sample", Questions: typesafe.Questions{"future": typesafe.RawQuestion(`{"type":"future-ranking"}`)}})
 
 			if !errors.Is(err, typesafe.ErrProtocol) {
@@ -111,17 +111,19 @@ func TestExtraBodyAddsFutureFieldsWithoutReplacingCoreRequest(t *testing.T) {
 
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
+
+			return
 		}
 
 		if string(body["priority"]) != `{"labels":["fast",null]}` || string(body["model"]) != `"chosen"` {
 			t.Errorf("extension request changed: %s", body)
 		}
 
-		io.WriteString(w, validResponse)
+		fixtureWriteString(t, w, validResponse)
 	}))
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 
 	_, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "sample", Questions: typesafe.Questions{"billing": typesafe.NoulQuestion{Instructions: "billing?"}}, ExtraBody: map[string]any{"priority": map[string]any{"labels": []any{"fast", nil}}}}, typesafe.WithModel("chosen"))
 	if err != nil {
@@ -132,11 +134,15 @@ func TestExtraBodyAddsFutureFieldsWithoutReplacingCoreRequest(t *testing.T) {
 func TestExtraBodyRejectsCoreCollisionsAndInvalidValuesBeforeHTTP(t *testing.T) {
 	var requests atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); io.WriteString(w, validResponse) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+
+		fixtureWriteString(t, w, validResponse)
+	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 
 	for _, name := range []string{"state", "model", "questions", "assets"} {
 		t.Run(name, func(t *testing.T) {
@@ -154,5 +160,18 @@ func TestExtraBodyRejectsCoreCollisionsAndInvalidValuesBeforeHTTP(t *testing.T) 
 
 	if requests.Load() != 0 {
 		t.Fatalf("invalid extensions reached HTTP: %d", requests.Load())
+	}
+}
+
+func assertFutureAnswers(t *testing.T, response *typesafe.SystemOneResponse) {
+	t.Helper()
+
+	unknown, ok := response.Answers["future"].(typesafe.UnknownAnswer)
+	if !ok || unknown.Type != "future-ranking" || string(unknown.Raw) != `{"type":"future-ranking","ranking":[2,1]}` {
+		t.Fatalf("future answer lost: %+v", response.Answers)
+	}
+
+	if additional, ok := response.Answers["another"].(typesafe.UnknownAnswer); !ok || additional.Type != "new-additional-kind" {
+		t.Fatal("additional future answer lost")
 	}
 }

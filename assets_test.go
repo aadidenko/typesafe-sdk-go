@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
@@ -16,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -37,120 +37,173 @@ func pngBytes(t *testing.T) []byte {
 	return b.Bytes()
 }
 
-func TestNamedImageMultipartReferences(t *testing.T) {
-	source := pngBytes(t)
+type assetRequestWire struct {
+	Model string `json:"model"`
+	State struct {
+		Nested []string `json:"nested"`
+	} `json:"state"`
+	Questions map[string]struct {
+		Instructions struct {
+			Image string `json:"image"`
+		} `json:"instructions"`
+		Criteria struct {
+			True []string `json:"true"`
+		} `json:"criteria"`
+	} `json:"questions"`
+	Assets map[string]struct{ Type, Part string } `json:"assets"`
+}
 
-	img, err := typesafe.ImageFromBytes(source)
+func mustImage(t *testing.T, data []byte) typesafe.Image {
+	t.Helper()
+
+	photo, err := typesafe.ImageFromBytes(data)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	return photo
+}
+
+func readAssetRequest(t *testing.T, r *http.Request, destination any) (*multipart.Reader, bool) {
+	t.Helper()
+
+	media, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "multipart/form-data" {
+		t.Errorf("content type %q: %v", media, err)
+
+		return nil, false
+	}
+
+	reader := multipart.NewReader(r.Body, parameters["boundary"])
+
+	first, err := reader.NextPart()
+	if err != nil {
+		t.Error(err)
+
+		return nil, false
+	}
+	defer fixtureClose(t, first)
+
+	if first.FormName() != "request" || first.Header.Get("Content-Type") != "application/json" {
+		t.Error("JSON must be first request part")
+
+		return nil, false
+	}
+
+	if !fixtureDecode(t, first, destination) {
+		return nil, false
+	}
+
+	return reader, true
+}
+
+func assertNamedReferences(t *testing.T, body assetRequestWire) {
+	t.Helper()
+
+	if body.Model != "chosen" || body.Assets["photo"].Type != "image" || body.Assets["photo"].Part == "" {
+		t.Errorf("bad descriptor/model: %+v", body)
+	}
+
+	question := body.Questions["visible"]
+	if question.Instructions.Image != "photo" || !reflect.DeepEqual(question.Criteria.True, []string{"photo"}) {
+		t.Errorf("question references changed: %+v", question)
+	}
+
+	if !reflect.DeepEqual(body.State.Nested, []string{"photo", "compare photo again"}) {
+		t.Errorf("references changed: %+v", body.State)
+	}
+}
+
+func assertImageUpload(t *testing.T, reader *multipart.Reader, partName string, source []byte) bool {
+	t.Helper()
+
+	part, err := reader.NextPart()
+	if err != nil {
+		t.Error(err)
+
+		return false
+	}
+	defer fixtureClose(t, part)
+
+	raw, ok := fixtureReadAll(t, part)
+	if !ok {
+		return false
+	}
+
+	if part.FormName() != partName || part.Header.Get("Content-Type") != "image/png" || !bytes.Equal(raw, source) {
+		t.Error("image part differs from descriptor/source")
+	}
+
+	return true
+}
+
+func TestNamedImageMultipartReferences(t *testing.T) {
+	source := pngBytes(t)
+	img := mustImage(t, source)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("TypeSafe-Danger-Zone-Images") != "true" {
 			t.Error("missing image opt in")
 		}
 
-		media, p, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || media != "multipart/form-data" {
-			t.Errorf("content type %q: %v", media, err)
+		var body assetRequestWire
 
+		reader, ok := readAssetRequest(t, r, &body)
+
+		if !ok {
 			return
 		}
 
-		mr := multipart.NewReader(r.Body, p["boundary"])
+		assertNamedReferences(t, body)
 
-		first, err := mr.NextPart()
-		if err != nil {
-			t.Error(err)
-
+		if !assertImageUpload(t, reader, body.Assets["photo"].Part, source) {
 			return
 		}
 
-		if first.FormName() != "request" || first.Header.Get("Content-Type") != "application/json" {
-			t.Error("JSON must be first request part")
-		}
-
-		var body struct {
-			Model     string                                 `json:"model"`
-			State     any                                    `json:"state"`
-			Questions map[string]any                         `json:"questions"`
-			Assets    map[string]struct{ Type, Part string } `json:"assets"`
-		}
-
-		if err := json.NewDecoder(first).Decode(&body); err != nil {
-			t.Error(err)
-		}
-
-		if body.Model != "chosen" || body.Assets["photo"].Type != "image" || body.Assets["photo"].Part == "" {
-			t.Errorf("bad descriptor/model: %+v", body)
-		}
-
-		question := body.Questions["visible"].(map[string]any)
-		if question["instructions"].(map[string]any)["image"] != "photo" || question["criteria"].(map[string]any)["true"].([]any)[0] != "photo" {
-			t.Errorf("question references changed: %v", question)
-		}
-
-		nested := body.State.(map[string]any)["nested"].([]any)
-		if nested[0] != "photo" || nested[1] != "compare photo again" {
-			t.Errorf("references changed: %v", nested)
-		}
-
-		part, err := mr.NextPart()
-		if err != nil {
-			t.Error(err)
-
-			return
-		}
-
-		raw, _ := io.ReadAll(part)
-		if part.FormName() != body.Assets["photo"].Part || part.Header.Get("Content-Type") != "image/png" || !bytes.Equal(raw, source) {
-			t.Error("image part differs from descriptor/source")
-		}
-
-		if _, err := mr.NextPart(); err != io.EOF {
+		if _, err := reader.NextPart(); !errors.Is(err, io.EOF) {
 			t.Error("repeated reference must upload once")
 		}
 
-		io.WriteString(w, `{"model":"chosen","usage":{"input_tokens":1,"output_tokens":1},"answers":{"visible":{"type":"noul","noul":0.7}}}`)
+		fixtureWriteString(t, w, `{"model":"chosen","usage":{"input_tokens":1,"output_tokens":1},"answers":{"visible":{"type":"noul","noul":0.7}}}`)
 	}))
 
 	defer server.Close()
 
-	client, err := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "chosen", ExperimentalImages: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "chosen", ExperimentalImages: true})
 
-	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: map[string]any{"nested": []any{"photo", "compare photo again"}}, Questions: typesafe.Questions{"visible": typesafe.NoulQuestion{Instructions: map[string]any{"image": "photo"}, Criteria: &typesafe.NoulCriteria{True: []any{"photo"}}}}, Assets: typesafe.Assets{"photo": img}})
+	_, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: map[string]any{"nested": []any{"photo", "compare photo again"}}, Questions: typesafe.Questions{"visible": typesafe.NoulQuestion{Instructions: map[string]any{"image": "photo"}, Criteria: &typesafe.NoulCriteria{True: []any{"photo"}}}}, Assets: typesafe.Assets{"photo": img}})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
+func assertImageFormatCounts(t *testing.T, reader *multipart.Reader) {
+	t.Helper()
+
+	counts := make(map[string]int)
+
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			t.Error(err)
+
+			return
+		}
+
+		counts[part.Header.Get("Content-Type")]++
+		fixtureClose(t, part)
+	}
+
+	if counts["image/png"] != 2 || counts["image/jpeg"] != 1 || len(counts) != 2 {
+		t.Errorf("image part content types: %v", counts)
+	}
+}
+
 func TestImageSourcesAndGeneratedReferences(t *testing.T) {
-	data := pngBytes(t)
-	path := filepath.Join(t.TempDir(), "image.png")
-
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	fromFile, err := typesafe.ImageFromFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fromBase64, err := typesafe.ImageFromBase64(" \n" + base64.StdEncoding.EncodeToString(data) + "\t")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	source := image.NewRGBA(image.Rect(0, 0, 2, 2))
-
-	fromImage, err := typesafe.ImageFromGoImage(source, "jpeg")
-	if err != nil {
-		t.Fatal(err)
-	}
+	fromFile, fromBase64, fromImage := imageSources(t)
 
 	var assets typesafe.Assets
 
@@ -161,41 +214,29 @@ func TestImageSourcesAndGeneratedReferences(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Error(err)
+		var body struct {
+			Assets map[string]any `json:"assets"`
+		}
 
+		reader, ok := readAssetRequest(t, r, &body)
+
+		if !ok {
 			return
 		}
 
-		if len(r.MultipartForm.File) != 3 {
-			t.Errorf("got %d image parts", len(r.MultipartForm.File))
+		if len(body.Assets) != 3 {
+			t.Errorf("got %d image descriptors", len(body.Assets))
 		}
 
-		seenPNG, seenJPEG := 0, 0
-
-		for _, files := range r.MultipartForm.File {
-			for _, f := range files {
-				switch f.Header.Get("Content-Type") {
-				case "image/png":
-					seenPNG++
-				case "image/jpeg":
-					seenJPEG++
-				}
-			}
-		}
-
-		if seenPNG != 2 || seenJPEG != 1 {
-			t.Errorf("content types PNG=%d JPEG=%d", seenPNG, seenJPEG)
-		}
-
-		io.WriteString(w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
+		assertImageFormatCounts(t, reader)
+		fixtureWriteString(t, w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Compression: typesafe.CompressionNone})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, Compression: typesafe.CompressionNone})
 
-	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: refs, Assets: assets, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "compare"}}}, typesafe.WithExperimentalImages(true))
+	_, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: refs, Assets: assets, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "compare"}}}, typesafe.WithExperimentalImages(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,15 +264,19 @@ func TestInvalidImageSourcesAndOptInFailLocally(t *testing.T) {
 		})
 	}
 
-	source, _ := typesafe.ImageFromBytes(pngBytes(t))
+	source := mustImage(t, pngBytes(t))
 
 	var traffic atomic.Int64
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { traffic.Add(1); w.WriteHeader(500) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		traffic.Add(1)
+
+		w.WriteHeader(500)
+	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 	for _, request := range []typesafe.SystemOneRequest{
 		{State: "photo", Assets: typesafe.Assets{"photo": source}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "visible?"}}},
 		{State: "photo", Questions: typesafe.Questions{"q": typesafe.BoxQuestion{Instructions: "locate"}}},
@@ -249,7 +294,7 @@ func TestInvalidImageSourcesAndOptInFailLocally(t *testing.T) {
 		}
 	}
 
-	enabled, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true})
+	enabled := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true})
 	_, err := enabled.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "photo", Assets: typesafe.Assets{"photo": source}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "visible?"}}}, typesafe.WithExperimentalImages(false))
 
 	if !errors.Is(err, typesafe.ErrValidation) {
@@ -264,7 +309,7 @@ func TestInvalidImageSourcesAndOptInFailLocally(t *testing.T) {
 func TestImageSnapshotsAndDistinctNamedUploads(t *testing.T) {
 	data := pngBytes(t)
 	original := append([]byte(nil), data...)
-	fromBytes, _ := typesafe.ImageFromBytes(data)
+	fromBytes := mustImage(t, data)
 	path := filepath.Join(t.TempDir(), "image.png")
 
 	if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -283,51 +328,89 @@ func TestImageSnapshotsAndDistinctNamedUploads(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		media, p, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if media != "multipart/form-data" {
-			t.Error("expected multipart")
-
-			return
-		}
-
-		mr := multipart.NewReader(r.Body, p["boundary"])
-		first, _ := mr.NextPart()
-
 		var request struct {
 			Assets map[string]struct{ Part string } `json:"assets"`
 		}
 
-		if err := json.NewDecoder(first).Decode(&request); err != nil {
-			t.Error(err)
+		reader, ok := readAssetRequest(t, r, &request)
+
+		if !ok {
+			return
 		}
 
 		if len(request.Assets) != 2 || request.Assets["named-a"].Part == request.Assets["named-b"].Part {
 			t.Error("each named descriptor needs a distinct part")
 		}
 
-		for i := 0; i < 2; i++ {
-			part, err := mr.NextPart()
-			if err != nil {
-				t.Error(err)
-
-				return
-			}
-
-			raw, _ := io.ReadAll(part)
-			if !bytes.Equal(raw, original) {
-				t.Error("constructor snapshot changed")
-			}
+		if !assertSnapshotUploads(t, reader, original) {
+			return
 		}
 
-		io.WriteString(w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
+		fixtureWriteString(t, w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true})
 
 	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "named-a and named-b", Assets: typesafe.Assets{"named-a": fromBytes, "named-b": fromFile}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "compare"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func assertSnapshotUploads(t *testing.T, reader *multipart.Reader, original []byte) bool {
+	t.Helper()
+
+	for range 2 {
+		part, err := reader.NextPart()
+		if err != nil {
+			t.Error(err)
+
+			return false
+		}
+
+		raw, ok := fixtureReadAll(t, part)
+		fixtureClose(t, part)
+
+		if !ok {
+			return false
+		}
+
+		if !bytes.Equal(raw, original) {
+			t.Error("constructor snapshot changed")
+		}
+	}
+
+	return true
+}
+
+func imageSources(t *testing.T) (typesafe.Image, typesafe.Image, typesafe.Image) {
+	t.Helper()
+
+	data := pngBytes(t)
+	path := filepath.Join(t.TempDir(), "image.png")
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fromFile, err := typesafe.ImageFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fromBase64, err := typesafe.ImageFromBase64(" \n" + base64.StdEncoding.EncodeToString(data) + "\t")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := image.NewRGBA(image.Rect(0, 0, 2, 2))
+
+	fromImage, err := typesafe.ImageFromGoImage(source, "jpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return fromFile, fromBase64, fromImage
 }

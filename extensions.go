@@ -16,18 +16,18 @@ func (q RawQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	var envelope map[string]json.RawMessage
 
 	if err := json.Unmarshal(q, &envelope); err != nil || envelope == nil {
-		return "", nil, &ValidationError{"raw_question", "must be a JSON object"}
+		return "", nil, &ValidationError{Field: "raw_question", Message: "must be a JSON object"}
 	}
 
 	var kind string
 
 	if err := json.Unmarshal(envelope["type"], &kind); err != nil || strings.TrimSpace(kind) == "" {
-		return "", nil, &ValidationError{"raw_question.type", "must be a nonblank string"}
+		return "", nil, &ValidationError{Field: "raw_question.type", Message: "must be a nonblank string"}
 	}
 
 	switch kind {
 	case "noul", "choice", "score", "box":
-		return "", nil, &ValidationError{"raw_question.type", "known kinds require a concrete SDK Question"}
+		return "", nil, &ValidationError{Field: "raw_question.type", Message: "known kinds require a concrete SDK Question"}
 	}
 
 	return kind, append(json.RawMessage(nil), q...), nil

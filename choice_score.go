@@ -14,7 +14,7 @@ type ChoiceQuestion struct {
 
 func (q ChoiceQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	if len(q.Criteria) < 1 || len(q.Criteria) > 255 {
-		return "", nil, &ValidationError{"criteria", "Choice requires 1–255 alternatives"}
+		return "", nil, &ValidationError{Field: "criteria", Message: "Choice requires 1–255 alternatives"}
 	}
 
 	instructions, err := encodeContent(q.Instructions, "instructions", true)
@@ -36,7 +36,7 @@ func (q ChoiceQuestion) encodeQuestion() (string, json.RawMessage, error) {
 		Type         string                     `json:"type"`
 		Instructions json.RawMessage            `json:"instructions,omitempty"`
 		Criteria     map[string]json.RawMessage `json:"criteria"`
-	}{"choice", instructions, criteria})
+	}{Type: "choice", Instructions: instructions, Criteria: criteria})
 
 	return "choice", body, err
 }
@@ -49,7 +49,7 @@ type ScoreQuestion struct {
 
 func (q ScoreQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	if len(q.Criteria) < 1 || len(q.Criteria) > 10 {
-		return "", nil, &ValidationError{"criteria", "Score requires 1–10 levels"}
+		return "", nil, &ValidationError{Field: "criteria", Message: "Score requires 1–10 levels"}
 	}
 
 	instructions, err := encodeContent(q.Instructions, "instructions", true)
@@ -71,7 +71,7 @@ func (q ScoreQuestion) encodeQuestion() (string, json.RawMessage, error) {
 		Type         string            `json:"type"`
 		Instructions json.RawMessage   `json:"instructions,omitempty"`
 		Criteria     []json.RawMessage `json:"criteria"`
-	}{"score", instructions, criteria})
+	}{Type: "score", Instructions: instructions, Criteria: criteria})
 
 	return "score", body, err
 }
@@ -83,6 +83,7 @@ type ChoiceAnswer struct {
 	Probabilities map[string]float64 `json:"probabilities"`
 }
 
+// Kind identifies a Choice Answer.
 func (ChoiceAnswer) Kind() string { return "choice" }
 
 // ScoreAnswer retains a fractional expected score and its ordered rubric.
@@ -94,8 +95,10 @@ type ScoreAnswer struct {
 	Probabilities map[int]float64 `json:"probabilities"`
 }
 
+// Kind identifies a Score Answer.
 func (ScoreAnswer) Kind() string { return "score" }
 
+// Choice returns the named Choice Answer, or an error for a missing name or different kind.
 func (r *SystemOneResponse) Choice(name string) (ChoiceAnswer, error) {
 	answer, ok := r.Answers[name]
 	if !ok {
@@ -110,6 +113,7 @@ func (r *SystemOneResponse) Choice(name string) (ChoiceAnswer, error) {
 	return choice, nil
 }
 
+// Score returns the named Score Answer, or an error for a missing name or different kind.
 func (r *SystemOneResponse) Score(name string) (ScoreAnswer, error) {
 	answer, ok := r.Answers[name]
 	if !ok {
