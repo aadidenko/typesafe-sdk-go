@@ -41,7 +41,7 @@ func (c *Client) ListModels(ctx context.Context, options ...CallOption) (*ListMo
 
 func parseModels(meta HTTPMetadata) (*ListModelsResponse, error) {
 	fail := func(field string) (*ListModelsResponse, error) {
-		return nil, &ProtocolError{meta, field, "required field has an invalid structural type"}
+		return nil, &ProtocolError{HTTPMetadata: meta, Field: field, Message: "required field has an invalid structural type"}
 	}
 
 	var root map[string]json.RawMessage

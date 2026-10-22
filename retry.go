@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,20 +44,20 @@ func DefaultRetryPolicy() RetryPolicy {
 
 func copyRetryPolicy(policy RetryPolicy) (RetryPolicy, error) {
 	if policy.MaxRetries < 0 {
-		return RetryPolicy{}, &ValidationError{"retry.max_retries", "must not be negative"}
+		return RetryPolicy{}, &ValidationError{Field: "retry.max_retries", Message: "must not be negative"}
 	}
 
 	if policy.BackoffInitial < 0 || policy.BackoffMax < 0 {
-		return RetryPolicy{}, &ValidationError{"retry.backoff", "must not be negative"}
+		return RetryPolicy{}, &ValidationError{Field: "retry.backoff", Message: "must not be negative"}
 	}
 
-	if math.IsNaN(policy.Jitter) || math.IsInf(policy.Jitter, 0) || policy.Jitter < 0 || policy.Jitter > 1 {
-		return RetryPolicy{}, &ValidationError{"retry.jitter", "must be finite and between zero and one"}
+	if invalidJitter(policy.Jitter) {
+		return RetryPolicy{}, &ValidationError{Field: "retry.jitter", Message: "must be finite and between zero and one"}
 	}
 
 	for _, status := range policy.HTTPStatuses {
 		if status < 100 || status > 599 {
-			return RetryPolicy{}, &ValidationError{"retry.http_statuses", "must contain HTTP status codes from 100 to 599"}
+			return RetryPolicy{}, &ValidationError{Field: "retry.http_statuses", Message: "must contain HTTP status codes from 100 to 599"}
 		}
 	}
 
@@ -93,22 +94,9 @@ func (p RetryPolicy) retryable(err error) bool {
 	)
 
 	if errors.As(err, &httpError) {
-		for _, status := range p.HTTPStatuses {
-			if httpError.StatusCode == status {
-				eligible = true
-				break
-			}
-		}
+		eligible = slices.Contains(p.HTTPStatuses, httpError.StatusCode)
 	} else if errors.As(err, &transportError) {
-		var network net.Error
-
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout()) {
-			eligible = p.RetryTimeouts
-		} else {
-			var operation *net.OpError
-
-			eligible = p.RetryConnectionErrors && (errors.As(err, &operation) || (network != nil && network.Temporary()) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF))
-		}
+		eligible = p.retryableTransport(err)
 	}
 
 	return eligible || (p.Predicate != nil && p.Predicate(err))
@@ -138,6 +126,7 @@ func (p RetryPolicy) delay(retryNumber int, headers http.Header) time.Duration {
 		}
 	}
 
+	//nolint:gosec // G404: jitter spreads retry scheduling; it is not a security random value.
 	return delay - time.Duration(float64(delay)*p.Jitter*rand.Float64())
 }
 
@@ -238,13 +227,37 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 		delay := s.retry.delay(retryNumber+1, meta.Headers)
 		c.logRetry(ctx, method, path, retryNumber+1, delay, meta, last)
 
-		timer := time.NewTimer(delay)
-		select {
-		case <-total.Done():
-			timer.Stop()
-
+		if err := waitRetry(total, delay); err != nil {
 			return meta, retryContextError(total, meta, last)
-		case <-timer.C:
 		}
+	}
+}
+
+func invalidJitter(jitter float64) bool {
+	return math.IsNaN(jitter) || math.IsInf(jitter, 0) || jitter < 0 || jitter > 1
+}
+
+func (p RetryPolicy) retryableTransport(err error) bool {
+	var network net.Error
+
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout()) {
+		return p.RetryTimeouts
+	}
+
+	var operation *net.OpError
+
+	//nolint:staticcheck // SA1019: temporary net.Error remains part of the SDK's accepted retry contract.
+	return p.RetryConnectionErrors && (errors.As(err, &operation) || (network != nil && network.Temporary()) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF))
+}
+
+func waitRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
