@@ -160,16 +160,19 @@ func retryContextError(ctx context.Context, meta HTTPMetadata, last error) error
 	return &TransportError{HTTPMetadata: meta, Cause: cause}
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body []byte, s callSettings) (HTTPMetadata, error) {
+func (c *Client) do(ctx context.Context, method, path string, body []byte, s callSettings) (meta HTTPMetadata, resultErr error) {
+	started := time.Now()
+	attempts := 0
+	defer func() { c.logCallFailure(ctx, method, path, attempts, started, meta, resultErr) }()
 	total, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	var meta HTTPMetadata
 	var last error
 	for retryNumber := 0; ; retryNumber++ {
 		if total.Err() != nil {
 			return meta, retryContextError(total, meta, last)
 		}
 		attempt, stop := context.WithTimeout(total, s.attemptTimeout)
+		attempts++
 		meta, last = c.doAttempt(attempt, method, path, body, s, retryNumber)
 		stop()
 		if last == nil {
@@ -181,7 +184,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 		if retryNumber == s.retry.MaxRetries || !s.retry.retryable(last) {
 			return meta, last
 		}
-		timer := time.NewTimer(s.retry.delay(retryNumber+1, meta.Headers))
+		delay := s.retry.delay(retryNumber+1, meta.Headers)
+		c.logRetry(ctx, method, path, retryNumber+1, delay, meta, last)
+		timer := time.NewTimer(delay)
 		select {
 		case <-total.Done():
 			timer.Stop()
