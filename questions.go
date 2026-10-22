@@ -39,25 +39,32 @@ func (q NoulQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	if err != nil {
 		return "", nil, err
 	}
+
 	var criteria map[string]json.RawMessage
+
 	if q.Criteria != nil {
 		criteria = make(map[string]json.RawMessage)
+
 		for name, value := range map[string]any{"true": q.Criteria.True, "false": q.Criteria.False} {
 			if value == nil {
 				continue
 			}
+
 			encoded, err := encodeContent(value, "criteria."+name, true)
 			if err != nil {
 				return "", nil, err
 			}
+
 			criteria[name] = encoded
 		}
 	}
+
 	body, err := json.Marshal(struct {
 		Type         string                     `json:"type"`
 		Instructions json.RawMessage            `json:"instructions,omitempty"`
 		Criteria     map[string]json.RawMessage `json:"criteria,omitempty"`
-	}{"noul", instructions, criteria})
+	}{Type: "noul", Instructions: instructions, Criteria: criteria})
+
 	return "noul", body, err
 }
 
@@ -67,12 +74,15 @@ func (q NoulQuestion) encodeQuestion() (string, json.RawMessage, error) {
 func encodeContent(value any, field string, nullable bool) (json.RawMessage, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return nil, &ValidationError{field, "must be JSON-encodable"}
+		return nil, &ValidationError{Field: field, Message: "must be JSON-encodable"}
 	}
+
 	var decoded any
+
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		return nil, &ValidationError{field, "must contain valid JSON"}
+		return nil, &ValidationError{Field: field, Message: "must contain valid JSON"}
 	}
+
 	switch decoded.(type) {
 	case string, map[string]any, []any:
 		return encoded, nil
@@ -81,5 +91,6 @@ func encodeContent(value any, field string, nullable bool) (json.RawMessage, err
 			return encoded, nil
 		}
 	}
-	return nil, &ValidationError{field, "must be a string, object or array"}
+
+	return nil, &ValidationError{Field: field, Message: "must be a string, object or array"}
 }

@@ -14,25 +14,30 @@ type ChoiceQuestion struct {
 
 func (q ChoiceQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	if len(q.Criteria) < 1 || len(q.Criteria) > 255 {
-		return "", nil, &ValidationError{"criteria", "Choice requires 1–255 alternatives"}
+		return "", nil, &ValidationError{Field: "criteria", Message: "Choice requires 1–255 alternatives"}
 	}
+
 	instructions, err := encodeContent(q.Instructions, "instructions", true)
 	if err != nil {
 		return "", nil, err
 	}
+
 	criteria := make(map[string]json.RawMessage, len(q.Criteria))
 	for name, value := range q.Criteria {
 		encoded, err := encodeContent(value, "criteria."+name, true)
 		if err != nil {
 			return "", nil, err
 		}
+
 		criteria[name] = encoded
 	}
+
 	body, err := json.Marshal(struct {
 		Type         string                     `json:"type"`
 		Instructions json.RawMessage            `json:"instructions,omitempty"`
 		Criteria     map[string]json.RawMessage `json:"criteria"`
-	}{"choice", instructions, criteria})
+	}{Type: "choice", Instructions: instructions, Criteria: criteria})
+
 	return "choice", body, err
 }
 
@@ -44,25 +49,30 @@ type ScoreQuestion struct {
 
 func (q ScoreQuestion) encodeQuestion() (string, json.RawMessage, error) {
 	if len(q.Criteria) < 1 || len(q.Criteria) > 10 {
-		return "", nil, &ValidationError{"criteria", "Score requires 1–10 levels"}
+		return "", nil, &ValidationError{Field: "criteria", Message: "Score requires 1–10 levels"}
 	}
+
 	instructions, err := encodeContent(q.Instructions, "instructions", true)
 	if err != nil {
 		return "", nil, err
 	}
+
 	criteria := make([]json.RawMessage, len(q.Criteria))
 	for i, value := range q.Criteria {
 		encoded, err := encodeContent(value, fmt.Sprintf("criteria[%d]", i), false)
 		if err != nil {
 			return "", nil, err
 		}
+
 		criteria[i] = encoded
 	}
+
 	body, err := json.Marshal(struct {
 		Type         string            `json:"type"`
 		Instructions json.RawMessage   `json:"instructions,omitempty"`
 		Criteria     []json.RawMessage `json:"criteria"`
-	}{"score", instructions, criteria})
+	}{Type: "score", Instructions: instructions, Criteria: criteria})
+
 	return "score", body, err
 }
 
@@ -73,6 +83,7 @@ type ChoiceAnswer struct {
 	Probabilities map[string]float64 `json:"probabilities"`
 }
 
+// Kind identifies a Choice Answer.
 func (ChoiceAnswer) Kind() string { return "choice" }
 
 // ScoreAnswer retains a fractional expected score and its ordered rubric.
@@ -84,28 +95,36 @@ type ScoreAnswer struct {
 	Probabilities map[int]float64 `json:"probabilities"`
 }
 
+// Kind identifies a Score Answer.
 func (ScoreAnswer) Kind() string { return "score" }
 
+// Choice returns the named Choice Answer, or an error for a missing name or different kind.
 func (r *SystemOneResponse) Choice(name string) (ChoiceAnswer, error) {
 	answer, ok := r.Answers[name]
 	if !ok {
 		return ChoiceAnswer{}, fmt.Errorf("%w: %s", ErrAnswerMissing, name)
 	}
+
 	choice, ok := answer.(ChoiceAnswer)
 	if !ok {
 		return ChoiceAnswer{}, fmt.Errorf("%w: %s", ErrAnswerKind, name)
 	}
+
 	return choice, nil
 }
+
+// Score returns the named Score Answer, or an error for a missing name or different kind.
 func (r *SystemOneResponse) Score(name string) (ScoreAnswer, error) {
 	answer, ok := r.Answers[name]
 	if !ok {
 		return ScoreAnswer{}, fmt.Errorf("%w: %s", ErrAnswerMissing, name)
 	}
+
 	score, ok := answer.(ScoreAnswer)
 	if !ok {
 		return ScoreAnswer{}, fmt.Errorf("%w: %s", ErrAnswerKind, name)
 	}
+
 	return score, nil
 }
 
@@ -113,10 +132,12 @@ func (r *SystemOneResponse) Score(name string) (ScoreAnswer, error) {
 // It also works for future kinds retained as UnknownAnswer.
 func (r *SystemOneResponse) AnswersByKind(kind string) map[string]Answer {
 	result := make(map[string]Answer)
+
 	for name, answer := range r.Answers {
 		if answer.Kind() == kind {
 			result[name] = answer
 		}
 	}
+
 	return result
 }

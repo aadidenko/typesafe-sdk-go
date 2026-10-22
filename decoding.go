@@ -13,6 +13,7 @@ func (m HTTPMetadata) DecodeResponse(destination any) error {
 	if err := json.Unmarshal(m.RawBody, destination); err != nil {
 		return fmt.Errorf("typesafe: decode response: %w", err)
 	}
+
 	return nil
 }
 
@@ -21,14 +22,18 @@ func (m HTTPMetadata) DecodeResponse(destination any) error {
 // validation remains the caller's responsibility. JSON errors support errors.As.
 func (r *SystemOneResponse) DecodeAnswers(destination any) error {
 	if r == nil {
-		return &ValidationError{"response", "must not be nil"}
+		return &ValidationError{Field: "response", Message: "must not be nil"}
 	}
+
 	var root map[string]json.RawMessage
+
 	if err := json.Unmarshal(r.RawBody, &root); err != nil {
 		return fmt.Errorf("typesafe: decode answers: %w", err)
 	}
+
 	if err := json.Unmarshal(root["answers"], destination); err != nil {
 		return fmt.Errorf("typesafe: decode answers: %w", err)
 	}
+
 	return nil
 }

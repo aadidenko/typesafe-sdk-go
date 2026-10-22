@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
+// Environment names and defaults used by explicit configuration loading.
 const (
-	APIKeyEnv             = "TYPESAFE_API_KEY"
+	APIKeyEnv             = "TYPESAFE_API_KEY" //nolint:gosec // G101: environment variable name, not an embedded credential.
 	BaseURLEnv            = "TYPESAFE_BASE_URL"
 	DefaultModelEnv       = "TYPESAFE_DEFAULT_MODEL"
 	LogLevelEnv           = "TYPESAFE_LOG_LEVEL"
@@ -29,11 +30,12 @@ func LoadEnv(config Config) Config {
 	for _, item := range []struct {
 		value *string
 		name  string
-	}{{&config.APIKey, APIKeyEnv}, {&config.BaseURL, BaseURLEnv}, {&config.Model, DefaultModelEnv}} {
+	}{{value: &config.APIKey, name: APIKeyEnv}, {value: &config.BaseURL, name: BaseURLEnv}, {value: &config.Model, name: DefaultModelEnv}} {
 		if *item.value == "" {
 			*item.value = strings.TrimSpace(os.Getenv(item.name))
 		}
 	}
+
 	if config.LogLevel == nil {
 		level, ok := map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "warning": slog.LevelWarn, "error": slog.LevelError, "off": LogLevelOff}[strings.ToLower(strings.TrimSpace(os.Getenv(LogLevelEnv)))]
 		if ok {
@@ -41,7 +43,9 @@ func LoadEnv(config Config) Config {
 		}
 	} else {
 		level := *config.LogLevel
+
 		config.LogLevel = &level
 	}
+
 	return config
 }

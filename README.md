@@ -79,12 +79,22 @@ Answers](docs/questions.md), the [capability matrix](docs/capabilities.md), and 
 Deterministic local HTTP tests need no credentials or paid requests:
 
 ```sh
-go test -race ./...
-go vet ./...
-CGO_ENABLED=0 go build ./...
+make fmt-check
+make lint
+GOTOOLCHAIN=go1.25.0 go test -race ./...
+GOTOOLCHAIN=go1.25.0 go vet ./...
+CGO_ENABLED=0 GOTOOLCHAIN=go1.25.0 go build ./...
 ```
 
-CI runs those checks and formatting on minimum Go 1.25.0. The checked-in
+Use `make fmt` to apply mechanical formatting and logical whitespace. The
+[code-style policy](docs/code-style.md) describes the pinned lint toolchain,
+complete normal/live-tag coverage, local exceptions and manual review. The
+[strict-quality audit](docs/reviews/strict-go-lint-audit.md) records findings,
+their dispositions and the limits of the evidence.
+
+CI has an unconditional format/lint job using Go 1.26.2 and a separate minimum
+Go 1.25.0 race/vet/cgo-disabled build job. It also compiles the live suite with
+an empty test selection. Both jobs run on pushes and pull requests. The checked-in
 [OpenAPI snapshot](docs/reference/typesafe-openapi.json) defines the HTTP
 contract. Local tests establish SDK behavior against that contract; they do not
 establish live provider acceptance or model quality.

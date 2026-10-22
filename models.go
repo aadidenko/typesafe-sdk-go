@@ -27,36 +27,47 @@ func (c *Client) ListModels(ctx context.Context, options ...CallOption) (*ListMo
 	if err != nil {
 		return nil, err
 	}
+
 	meta, err := c.do(ctx, http.MethodGet, "/v1/models", nil, settings)
 	if err != nil {
 		return nil, err
 	}
+
 	response, err := parseModels(meta)
 	c.logProtocolFailure(ctx, http.MethodGet, "/v1/models", meta, err)
+
 	return response, err
 }
 
 func parseModels(meta HTTPMetadata) (*ListModelsResponse, error) {
 	fail := func(field string) (*ListModelsResponse, error) {
-		return nil, &ProtocolError{meta, field, "required field has an invalid structural type"}
+		return nil, &ProtocolError{HTTPMetadata: meta, Field: field, Message: "required field has an invalid structural type"}
 	}
+
 	var root map[string]json.RawMessage
+
 	if err := json.Unmarshal(meta.RawBody, &root); err != nil || root == nil {
 		return fail("$")
 	}
+
 	var models []map[string]json.RawMessage
+
 	if err := json.Unmarshal(root["models"], &models); err != nil || models == nil {
 		return fail("models")
 	}
+
 	result := &ListModelsResponse{HTTPMetadata: meta, Models: make([]ModelMetadata, len(models))}
 	for i, model := range models {
 		for name, dest := range map[string]*string{"name": &result.Models[i].Name, "description": &result.Models[i].Description, "release_date": &result.Models[i].ReleaseDate} {
 			var value *string
+
 			if err := json.Unmarshal(model[name], &value); err != nil || value == nil {
 				return fail(fmt.Sprintf("models[%d].%s", i, name))
 			}
+
 			*dest = *value
 		}
 	}
+
 	return result, nil
 }

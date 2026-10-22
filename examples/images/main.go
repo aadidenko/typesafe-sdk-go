@@ -11,29 +11,46 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 2 {
-		log.Fatal("usage: images path/to/image.png")
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
+}
+
+func run() error {
+	if len(os.Args) != 2 {
+		return fmt.Errorf("usage: images path/to/image.png")
+	}
+
 	photo, err := typesafe.ImageFromFile(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
 	var assets typesafe.Assets
+
 	reference := assets.Add(photo)
+
 	client, err := typesafe.NewClient(typesafe.Config{APIKey: os.Getenv("TYPESAFE_API_KEY"), Model: "jev-latest", ExperimentalImages: true})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
 	response, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{
 		State: map[string]any{"photo": reference}, Assets: assets,
 		Questions: typesafe.Questions{"location": typesafe.BoxQuestion{Instructions: "Locate the largest object in " + reference}},
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
 	box, err := response.Box("location")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	fmt.Printf("top=%g bottom=%g left=%g right=%g confidence=%v\n", box.Box.Top, box.Box.Bottom, box.Box.Left, box.Box.Right, box.Confidence)
+
+	if _, err := fmt.Printf("top=%g bottom=%g left=%g right=%g confidence=%v\n", box.Box.Top, box.Box.Bottom, box.Box.Left, box.Box.Right, box.Confidence); err != nil {
+		return err
+	}
+
+	return nil
 }
