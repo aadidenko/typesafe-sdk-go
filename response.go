@@ -100,6 +100,12 @@ func parseSystemOne(meta HTTPMetadata, requested map[string]string) (*SystemOneR
 				return fail(field+".noul", "required probability from 0 to 1")
 			}
 			result.Answers[name] = NoulAnswer{*value}
+		} else if kind == "box" {
+			value, err := parseBox(object, field, meta)
+			if err != nil {
+				return nil, err
+			}
+			result.Answers[name] = value
 		} else {
 			result.Answers[name] = UnknownAnswer{kind, append(json.RawMessage(nil), raw...)}
 		}

@@ -18,18 +18,22 @@ const Version = "0.1.0-dev"
 // Config explicitly configures a Client. Zero timeout fields select defaults.
 // Construction never reads environment variables. HTTPClient remains caller-owned.
 type Config struct {
+	ExperimentalImages          bool
 	APIKey, BaseURL, Model      string
 	HTTPClient                  *http.Client
 	Headers                     http.Header
 	AttemptTimeout, CallTimeout time.Duration
 }
 type Client struct {
+	experimentalImages          bool
 	apiKey, baseURL, model      string
 	httpClient                  *http.Client
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
 }
 type callSettings struct {
+	experimentalImages          bool
+	contentType                 string
 	model                       string
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
@@ -37,6 +41,11 @@ type callSettings struct {
 
 // CallOption configures one call without changing client defaults.
 type CallOption func(*callSettings) error
+
+// WithExperimentalImages explicitly enables or disables experimental media for one call.
+func WithExperimentalImages(enabled bool) CallOption {
+	return func(s *callSettings) error { s.experimentalImages = enabled; return nil }
+}
 
 func WithModel(model string) CallOption {
 	return func(s *callSettings) error {
@@ -96,11 +105,11 @@ func NewClient(config Config) (*Client, error) {
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{}
 	}
-	return &Client{config.APIKey, strings.TrimRight(base.String(), "/"), config.Model, config.HTTPClient, config.Headers.Clone(), config.AttemptTimeout, config.CallTimeout}, nil
+	return &Client{experimentalImages: config.ExperimentalImages, apiKey: config.APIKey, baseURL: strings.TrimRight(base.String(), "/"), model: config.Model, httpClient: config.HTTPClient, headers: config.Headers.Clone(), attemptTimeout: config.AttemptTimeout, callTimeout: config.CallTimeout}, nil
 }
 
 func (c *Client) settings(options []CallOption) (callSettings, error) {
-	s := callSettings{c.model, c.headers.Clone(), c.attemptTimeout, c.callTimeout}
+	s := callSettings{experimentalImages: c.experimentalImages, contentType: "application/json", model: c.model, headers: c.headers.Clone(), attemptTimeout: c.attemptTimeout, callTimeout: c.callTimeout}
 	if s.headers == nil {
 		s.headers = make(http.Header)
 	}
@@ -120,6 +129,9 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	if err != nil {
 		return nil, err
 	}
+	if len(request.Assets) > 0 && !s.experimentalImages {
+		return nil, &ValidationError{"assets", "requires experimental images opt-in"}
+	}
 	state, err := encodeContent(request.State, "state", false)
 	if err != nil {
 		return nil, err
@@ -137,6 +149,9 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 		if err != nil {
 			return nil, err
 		}
+		if kind == "box" && !s.experimentalImages {
+			return nil, &ValidationError{"questions." + name, "Box requires experimental images opt-in"}
+		}
 		questions[name] = body
 		requested[name] = kind
 	}
@@ -147,6 +162,10 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	}{s.model, state, questions})
 	if err != nil {
 		return nil, &ValidationError{"request", "must be JSON-encodable"}
+	}
+	body, s.contentType, err = prepareAssets(body, request.Assets)
+	if err != nil {
+		return nil, err
 	}
 	meta, err := c.do(ctx, http.MethodPost, "/v1/systemone", body, s)
 	if err != nil {
@@ -172,7 +191,10 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, s cal
 	req.Header.Set("X-TypeSafe-Retry-Count", "0")
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", s.contentType)
+	}
+	if s.experimentalImages {
+		req.Header.Set("TypeSafe-Danger-Zone-Images", "true")
 	}
 	response, err := c.httpClient.Do(req)
 	if err != nil {

@@ -76,3 +76,46 @@ CI runs those checks and formatting on minimum Go 1.25.0. The checked-in
 [OpenAPI snapshot](docs/reference/typesafe-openapi.json) defines the HTTP
 contract. Local tests establish SDK behavior against that contract; they do not
 establish live provider acceptance or model quality.
+
+### Experimental images and Box
+
+Images and Box questions require `Config.ExperimentalImages: true` or
+`WithExperimentalImages(true)` on the call. This sends
+`TypeSafe-Danger-Zone-Images: true` and preserves your selected model. A per-call
+`WithExperimentalImages(false)` disables a client's opt-in. Calls using images
+or Box without the flag fail before sending a request.
+
+Use `ImageFromBytes`, `ImageFromFile`, `ImageFromBase64`, or
+`ImageFromGoImage(img, "png")` (`"jpeg"` and `"jpg"` are also accepted) to create
+an immutable PNG/JPEG source snapshot. File data is read at construction;
+changing the original file or byte slice does not change an Image. Image
+preparation does not resize images or correct their orientation.
+
+```go
+photo, err := typesafe.ImageFromFile("photo.png")
+if err != nil { /* handle local image error */ }
+var assets typesafe.Assets
+ref := assets.Add(photo)
+response, err := client.SystemOne(ctx, typesafe.SystemOneRequest{
+    State: map[string]any{"image": ref},
+    Assets: assets,
+    Questions: typesafe.Questions{
+        "location": typesafe.BoxQuestion{Instructions: "Locate the subject in " + ref},
+    },
+}, typesafe.WithExperimentalImages(true))
+```
+
+For a caller-chosen reference, use `Assets{"photo": photo}` and place `"photo"`
+in your content. References remain ordinary string values, including within
+longer strings or nested State, instructions, and criteria. There is no automatic
+image discovery. Each registered reference uploads once, even if used many
+times. Distinct registered names receive distinct image parts. Assets belong to
+one request; the client does not retain an attachment context.
+
+Image requests send a multipart body with a JSON `request` part followed by raw
+PNG/JPEG parts. Calls without image Assets remain JSON requests, including Box
+calls. The complete body is prepared before transport and can be replayed without
+reading image sources again. `response.Box(name)` returns normalized edge
+coordinates and a `*float64` Confidence: nil represents the model's explicit
+null confidence; a missing confidence is a protocol error. See
+[the compiling image example](examples/images/main.go).
