@@ -9,14 +9,9 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -25,58 +20,50 @@ import (
 	typesafe "github.com/aadidenko/typesafe-sdk-go"
 )
 
-func decodeCompressedRequest(t *testing.T, r *http.Request) ([]byte, []byte) {
-	t.Helper()
-
+func decodeCompressedRequest(r *http.Request) ([]byte, []byte, error) {
 	wire, err := io.ReadAll(r.Body)
 	if err != nil {
-		t.Error(err)
-
-		return nil, nil
+		return nil, nil, err
 	}
 
-	switch r.Header.Get("Content-Encoding") {
+	raw, err := decompressFixture(wire, r.Header.Get("Content-Encoding"))
+
+	return raw, wire, err
+}
+
+func decompressFixture(wire []byte, encoding string) ([]byte, error) {
+	switch encoding {
 	case "":
-		return wire, wire
+		return wire, nil
 	case "zstd":
 		decoder, err := zstd.NewReader(bytes.NewReader(wire), zstd.WithDecoderMaxWindow(8<<20), zstd.WithDecoderConcurrency(1))
 		if err != nil {
-			t.Error(err)
-
-			return nil, wire
+			return nil, err
 		}
 		defer decoder.Close()
 
-		raw, err := io.ReadAll(decoder)
-		if err != nil {
-			t.Error(err)
-		}
-
-		return raw, wire
+		return io.ReadAll(decoder)
 	case "gzip":
-		decoder, err := gzip.NewReader(bytes.NewReader(wire))
-		if err != nil {
-			t.Error(err)
-
-			return nil, wire
-		}
-		defer decoder.Close()
-
-		raw, err := io.ReadAll(decoder)
-		if err != nil {
-			t.Error(err)
-		}
-
-		return raw, wire
+		return decompressGzipFixture(wire)
 	default:
-		t.Errorf("unsupported layered encoding %q", r.Header.Get("Content-Encoding"))
-
-		return nil, wire
+		return nil, fmt.Errorf("unsupported layered encoding %q", encoding)
 	}
 }
 
-func writeCompressionResponse(w http.ResponseWriter) {
-	io.WriteString(w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
+func decompressGzipFixture(wire []byte) ([]byte, error) {
+	decoder, err := gzip.NewReader(bytes.NewReader(wire))
+	if err != nil {
+		return nil, err
+	}
+
+	raw, readErr := io.ReadAll(decoder)
+
+	return raw, errors.Join(readErr, decoder.Close())
+}
+
+func writeCompressionResponse(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	fixtureWriteString(t, w, `{"model":"m","usage":{"input_tokens":0,"output_tokens":0},"answers":{"q":{"type":"noul","noul":0.5}}}`)
 }
 
 func TestDefaultCompressionThreshold(t *testing.T) {
@@ -92,26 +79,11 @@ func TestDefaultCompressionThreshold(t *testing.T) {
 					want = "zstd"
 				}
 
-				if got := r.Header.Get("Content-Encoding"); got != want {
-					t.Errorf("size=%d encoding=%q want %q", size, got, want)
+				if !assertEncodedState(t, r, state, want, size) {
+					return
 				}
 
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Error("logical JSON content type changed")
-				}
-
-				raw, _ := decodeCompressedRequest(t, r)
-				if len(raw) != size {
-					t.Errorf("logical size=%d want %d", len(raw), size)
-				}
-
-				var request struct{ State string }
-
-				if err := json.Unmarshal(raw, &request); err != nil || request.State != state {
-					t.Errorf("logical JSON changed: %v", err)
-				}
-
-				writeCompressionResponse(w)
+				writeCompressionResponse(t, w)
 			}))
 
 			defer server.Close()
@@ -138,28 +110,20 @@ func TestCompressionModesAndCallOverrides(t *testing.T) {
 		option     []typesafe.CallOption
 		want       string
 	}{
-		{"gzip", typesafe.CompressionGzip, nil, "gzip"},
-		{"none", typesafe.CompressionNone, nil, ""},
-		{"zstd", typesafe.CompressionZstd, nil, "zstd"},
-		{"call gzip", typesafe.CompressionNone, []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionGzip)}, "gzip"},
-		{"call none", typesafe.CompressionZstd, []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionNone)}, ""},
-		{"call default", typesafe.CompressionNone, []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionDefault)}, "zstd"},
+		{name: "gzip", configured: typesafe.CompressionGzip, option: nil, want: "gzip"},
+		{name: "none", configured: typesafe.CompressionNone, option: nil, want: ""},
+		{name: "zstd", configured: typesafe.CompressionZstd, option: nil, want: "zstd"},
+		{name: "call gzip", configured: typesafe.CompressionNone, option: []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionGzip)}, want: "gzip"},
+		{name: "call none", configured: typesafe.CompressionZstd, option: []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionNone)}, want: ""},
+		{name: "call default", configured: typesafe.CompressionNone, option: []typesafe.CallOption{typesafe.WithCompression(typesafe.CompressionDefault)}, want: "zstd"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if got := r.Header.Get("Content-Encoding"); got != test.want {
-					t.Errorf("encoding=%q want %q", got, test.want)
+				if !assertEncodedState(t, r, state, test.want, 0) {
+					return
 				}
 
-				raw, _ := decodeCompressedRequest(t, r)
-
-				var request struct{ State string }
-
-				if err := json.Unmarshal(raw, &request); err != nil || request.State != state {
-					t.Errorf("logical JSON changed: %v", err)
-				}
-
-				writeCompressionResponse(w)
+				writeCompressionResponse(t, w)
 			}))
 			defer server.Close()
 
@@ -181,36 +145,18 @@ func TestCompressionModesAndCallOverrides(t *testing.T) {
 		}
 	}
 
-	var traffic atomic.Int64
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { traffic.Add(1); writeCompressionResponse(w) }))
-
-	defer server.Close()
-
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
-	request := typesafe.SystemOneRequest{State: state, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}
-
-	for _, option := range []typesafe.CallOption{typesafe.WithCompression("invalid"), typesafe.WithHeaders(http.Header{"content-encoding": {"gzip"}})} {
-		_, err := client.SystemOne(context.Background(), request, option)
-		if !errors.Is(err, typesafe.ErrValidation) {
-			t.Errorf("invalid override must fail locally: %v", err)
-		}
-	}
-
-	if traffic.Load() != 0 {
-		t.Error("invalid compression overrides sent HTTP traffic")
-	}
+	assertInvalidCompressionOverrides(t, state)
 }
 
 func TestLogicalBodyLimitIsNotExpandedByCompression(t *testing.T) {
 	var traffic atomic.Int64
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { traffic.Add(1); writeCompressionResponse(w) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { traffic.Add(1); writeCompressionResponse(t, w) }))
 
 	defer server.Close()
 
 	for _, mode := range []typesafe.Compression{typesafe.CompressionDefault, typesafe.CompressionGzip, typesafe.CompressionNone} {
-		client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Compression: mode})
+		client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, Compression: mode})
 		_, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: strings.Repeat("a", 32<<20), Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}})
 
 		if !errors.Is(err, typesafe.ErrValidation) {
@@ -227,6 +173,7 @@ func TestCompressedBodyAlsoRespectsProviderLimit(t *testing.T) {
 	// PNG decoders permit trailing data. Incompressible trailing bytes model a
 	// near-limit binary upload without a costly image encoder fixture.
 	source := make([]byte, (32<<20)-2048)
+	//nolint:gosec // G404: deterministic incompressible fixture bytes contain no secrets.
 	random := rand.New(rand.NewSource(1))
 
 	if _, err := random.Read(source); err != nil {
@@ -245,14 +192,20 @@ func TestCompressedBodyAlsoRespectsProviderLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		traffic.Add(1)
 
-		raw, wire := decodeCompressedRequest(t, r)
+		raw, wire, err := decodeCompressedRequest(r)
+		if err != nil {
+			t.Error(err)
+
+			return
+		}
+
 		t.Errorf("oversize compressed request sent: logical=%d encoded=%d", len(raw), len(wire))
-		writeCompressionResponse(w)
+		writeCompressionResponse(t, w)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true, Compression: typesafe.CompressionGzip})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, ExperimentalImages: true, Compression: typesafe.CompressionGzip})
 
 	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: "photo", Assets: typesafe.Assets{"photo": photo}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}})
 
@@ -264,151 +217,13 @@ func TestCompressedBodyAlsoRespectsProviderLimit(t *testing.T) {
 func TestCompressedJSONAndMultipartRetriesReplayExactBytes(t *testing.T) {
 	for _, mode := range []typesafe.Compression{typesafe.CompressionZstd, typesafe.CompressionGzip} {
 		for _, withImage := range []bool{false, true} {
-			t.Run(string(mode)+fmt.Sprint(withImage), func(t *testing.T) {
-				var (
-					attempts     atomic.Int32
-					mu           sync.Mutex
-					original     []byte
-					originalType string
-				)
-
-				path := filepath.Join(t.TempDir(), "photo.png")
-				imageData := pngBytes(t)
-
-				if err := os.WriteFile(path, imageData, 0o600); err != nil {
-					t.Fatal(err)
-				}
-
-				imageSource, err := typesafe.ImageFromFile(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					mu.Lock()
-					defer mu.Unlock()
-
-					count := attempts.Add(1)
-
-					if r.Header.Get("Content-Encoding") != string(mode) {
-						t.Error("selected encoding changed")
-					}
-
-					raw, wire := decodeCompressedRequest(t, r)
-					if count == 1 {
-						original = append([]byte(nil), wire...)
-						originalType = r.Header.Get("Content-Type")
-					} else if !bytes.Equal(original, wire) || r.Header.Get("Content-Type") != originalType {
-						t.Error("compressed representation changed on retry")
-					}
-
-					requestJSON := raw
-
-					if withImage {
-						media, p, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-						if err != nil || media != "multipart/form-data" {
-							t.Errorf("lost multipart type: %v", err)
-
-							return
-						}
-
-						reader := multipart.NewReader(bytes.NewReader(raw), p["boundary"])
-
-						first, err := reader.NextPart()
-						if err != nil {
-							t.Error(err)
-
-							return
-						}
-
-						if first.FormName() != "request" || first.Header.Get("Content-Type") != "application/json" {
-							t.Error("JSON part must be first")
-						}
-
-						requestJSON, _ = io.ReadAll(first)
-
-						var request struct {
-							Assets map[string]struct{ Type, Part string } `json:"assets"`
-						}
-
-						if err := json.Unmarshal(requestJSON, &request); err != nil {
-							t.Error(err)
-						}
-
-						part, err := reader.NextPart()
-						if err != nil {
-							t.Error(err)
-
-							return
-						}
-
-						partData, _ := io.ReadAll(part)
-						if !bytes.Equal(partData, imageData) || part.FormName() != request.Assets["photo"].Part || request.Assets["photo"].Type != "image" || part.Header.Get("Content-Type") != "image/png" {
-							t.Error("multipart image or descriptor changed")
-						}
-
-						if _, err := reader.NextPart(); err != io.EOF {
-							t.Error("unexpected extra image part")
-						}
-					} else if r.Header.Get("Content-Type") != "application/json" {
-						t.Error("lost JSON content type")
-					}
-
-					var request struct {
-						State struct {
-							Description string
-							Revision    string
-						}
-					}
-
-					if err := json.Unmarshal(requestJSON, &request); err != nil || request.State.Description != strings.Repeat("a", 2048) || request.State.Revision != "original" {
-						t.Errorf("logical snapshot changed: %v", err)
-					}
-
-					if count == 1 {
-						if err := os.WriteFile(path, []byte("changed after first attempt"), 0o600); err != nil {
-							t.Error(err)
-						}
-
-						w.WriteHeader(503)
-
-						return
-					}
-
-					writeCompressionResponse(w)
-				}))
-
-				defer server.Close()
-
-				policy := instantPolicy(1)
-
-				client, err := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "m", Compression: mode, ExperimentalImages: withImage, Retry: &policy})
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				changing := &changingJSON{}
-				request := typesafe.SystemOneRequest{State: map[string]any{"description": strings.Repeat("a", 2048), "revision": changing}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}
-
-				if withImage {
-					request.Assets = typesafe.Assets{"photo": imageSource}
-				}
-
-				_, err = client.SystemOne(context.Background(), request)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if attempts.Load() != 2 || changing.calls != 1 {
-					t.Errorf("attempts=%d marshals=%d", attempts.Load(), changing.calls)
-				}
-			})
+			t.Run(string(mode)+fmt.Sprint(withImage), func(t *testing.T) { exerciseCompressedReplay(t, mode, withImage) })
 		}
 	}
 }
 
 func TestMultipartCompressionThresholdUsesCompleteBody(t *testing.T) {
-	source, _ := typesafe.ImageFromBytes(pngBytes(t))
+	source := mustImage(t, pngBytes(t))
 
 	var (
 		target   atomic.Int64
@@ -416,28 +231,16 @@ func TestMultipartCompressionThresholdUsesCompleteBody(t *testing.T) {
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := decodeCompressedRequest(t, r)
-		want := target.Load()
-
-		if want == 0 {
-			baseline.Store(int64(len(raw)))
-		} else {
-			encoding := ""
-			if want == 1024 {
-				encoding = "zstd"
-			}
-
-			if r.Header.Get("Content-Encoding") != encoding || int64(len(raw)) != want {
-				t.Errorf("complete body size=%d encoding=%q want %d/%q", len(raw), r.Header.Get("Content-Encoding"), want, encoding)
-			}
+		if !observeMultipartCompressionSize(t, r, &target, &baseline) {
+			return
 		}
 
-		writeCompressionResponse(w)
+		writeCompressionResponse(t, w)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "m", ExperimentalImages: true})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "m", ExperimentalImages: true})
 	request := typesafe.SystemOneRequest{State: "photo", Assets: typesafe.Assets{"photo": source}, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}
 
 	if _, err := client.SystemOne(context.Background(), request, typesafe.WithCompression(typesafe.CompressionNone)); err != nil {
@@ -465,7 +268,12 @@ func TestZstdWindowSupportsLogicalBodiesLargerThanEightMiB(t *testing.T) {
 			t.Error("default must use zstd")
 		}
 
-		raw, wire := decodeCompressedRequest(t, r)
+		raw, wire, err := decodeCompressedRequest(r)
+		if err != nil {
+			t.Error(err)
+
+			return
+		}
 
 		var header zstd.Header
 
@@ -479,12 +287,12 @@ func TestZstdWindowSupportsLogicalBodiesLargerThanEightMiB(t *testing.T) {
 			t.Errorf("large JSON changed: %v", err)
 		}
 
-		writeCompressionResponse(w)
+		writeCompressionResponse(t, w)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
 	if _, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: state, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -499,13 +307,102 @@ func TestExactlyMaximumLogicalBodyIsAllowed(t *testing.T) {
 			t.Errorf("logical maximum request size=%d: %v", size, err)
 		}
 
-		writeCompressionResponse(w)
+		writeCompressionResponse(t, w)
 	}))
 
 	defer server.Close()
 
-	client, _ := typesafe.NewClient(typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "m", Compression: typesafe.CompressionNone})
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL, Model: "m", Compression: typesafe.CompressionNone})
 	if _, err := client.SystemOne(context.Background(), typesafe.SystemOneRequest{State: strings.Repeat("a", (32<<20)-len(envelope)), Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func assertInvalidCompressionOverrides(t *testing.T, state string) {
+	t.Helper()
+
+	var traffic atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { traffic.Add(1); writeCompressionResponse(t, w) }))
+
+	defer server.Close()
+
+	client := mustClient(t, typesafe.Config{APIKey: "key", BaseURL: server.URL})
+	request := typesafe.SystemOneRequest{State: state, Questions: typesafe.Questions{"q": typesafe.NoulQuestion{Instructions: "check"}}}
+
+	for _, option := range []typesafe.CallOption{typesafe.WithCompression("invalid"), typesafe.WithHeaders(http.Header{"content-encoding": {"gzip"}})} {
+		_, err := client.SystemOne(context.Background(), request, option)
+		if !errors.Is(err, typesafe.ErrValidation) {
+			t.Errorf("invalid override must fail locally: %v", err)
+		}
+	}
+
+	if traffic.Load() != 0 {
+		t.Error("invalid compression overrides sent HTTP traffic")
+	}
+}
+
+func assertEncodedState(t *testing.T, r *http.Request, state, encoding string, size int) bool {
+	t.Helper()
+
+	if r.Header.Get("Content-Encoding") != encoding {
+		t.Errorf("encoding=%q want %q", r.Header.Get("Content-Encoding"), encoding)
+	}
+
+	if r.Header.Get("Content-Type") != "application/json" {
+		t.Error("logical JSON content type changed")
+	}
+
+	raw, _, err := decodeCompressedRequest(r)
+	if err != nil {
+		t.Error(err)
+
+		return false
+	}
+
+	if size > 0 && len(raw) != size {
+		t.Errorf("logical size=%d want %d", len(raw), size)
+	}
+
+	var request struct{ State string }
+
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Error(err)
+
+		return false
+	}
+
+	if request.State != state {
+		t.Error("logical JSON state changed")
+	}
+
+	return true
+}
+
+func observeMultipartCompressionSize(t *testing.T, r *http.Request, target, baseline *atomic.Int64) bool {
+	t.Helper()
+
+	raw, _, err := decodeCompressedRequest(r)
+	if err != nil {
+		t.Error(err)
+
+		return false
+	}
+
+	want := target.Load()
+
+	if want == 0 {
+		baseline.Store(int64(len(raw)))
+	} else {
+		encoding := ""
+		if want == 1024 {
+			encoding = "zstd"
+		}
+
+		if r.Header.Get("Content-Encoding") != encoding || int64(len(raw)) != want {
+			t.Errorf("complete body size=%d encoding=%q want %d/%q", len(raw), r.Header.Get("Content-Encoding"), want, encoding)
+		}
+	}
+
+	return true
 }
