@@ -74,6 +74,9 @@ same Make targets; repository-wide green acceptance is a separate delivery gate.
 `make fmt` first applies gofumpt and goimports, then runs only the `wsl_v5` and
 `nlreturn` lint fixes for normal and live-tag source, and finishes with the
 mechanical formatters. It never runs the full lint profile with `--fix`.
+It finishes with the read-only formatting check. If the pinned whitespace fixer
+leaves a diagnostic, the command fails with that diagnostic; expand inline
+semicolon statements into a multiline block where needed and rerun it.
 `make fmt-check` combines formatter diffs with those same whitespace checks in
 both build modes, so a gofmt-clean file can still fail for logical whitespace.
 The lint command validates configuration and reports findings from both modes,

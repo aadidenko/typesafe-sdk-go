@@ -28,6 +28,9 @@ case ${1:-} in
         "$lint" run --config "$config" --enable-only=wsl_v5,nlreturn --fix ./...
         "$lint" run --config "$config" --enable-only=wsl_v5,nlreturn --fix --build-tags=typesafe_live ./...
         "$lint" fmt --config "$config" ./...
+        # The pinned fixer can report success without correcting inline
+        # semicolon statements. Verify the final files instead of trusting it.
+        sh "$0" fmt-check
         ;;
     fmt-check)
         status=0
