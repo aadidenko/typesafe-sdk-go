@@ -58,9 +58,12 @@ status-category sentinels include `ErrAuthentication`, `ErrPermission`,
 available through the error chain. Routine error formatting excludes API keys,
 headers and application bodies. The SDK emits no logs by default.
 
-This implementation slice delivers Noul evaluations and the transport/validation
+This implementation slice delivers Noul, Choice, and Score evaluations and the transport/validation
 foundation for [spec #1](https://github.com/aadidenko/typesafe-sdk-go/issues/1).
-Choice, Score, Box, model discovery, custom decoding, images, retries,
+See [Questions and typed Answers](docs/questions.md) for mixed evaluations,
+classification, scoring, and the runnable examples.
+
+Box, model discovery, custom decoding, images, retries,
 compression, environment helpers, extension fields, and optional diagnostics
 are assigned to dependent tickets and are not claimed as implemented here.
 

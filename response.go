@@ -100,6 +100,18 @@ func parseSystemOne(meta HTTPMetadata, requested map[string]string) (*SystemOneR
 				return fail(field+".noul", "required probability from 0 to 1")
 			}
 			result.Answers[name] = NoulAnswer{*value}
+		} else if kind == "choice" {
+			answer, err := parseChoiceAnswer(object, field, meta)
+			if err != nil {
+				return nil, err
+			}
+			result.Answers[name] = answer
+		} else if kind == "score" {
+			answer, err := parseScoreAnswer(object, field, meta)
+			if err != nil {
+				return nil, err
+			}
+			result.Answers[name] = answer
 		} else {
 			result.Answers[name] = UnknownAnswer{kind, append(json.RawMessage(nil), raw...)}
 		}

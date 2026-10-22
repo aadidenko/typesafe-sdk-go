@@ -152,7 +152,14 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	if err != nil {
 		return nil, err
 	}
-	return parseSystemOne(meta, requested)
+	response, err := parseSystemOne(meta, requested)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAnsweredQuestions(response, questions); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte, s callSettings) (HTTPMetadata, error) {
