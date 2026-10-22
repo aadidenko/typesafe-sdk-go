@@ -178,11 +178,15 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 		questions[name] = body
 		requested[name] = kind
 	}
-	body, err := json.Marshal(struct {
-		Model     string                     `json:"model"`
-		State     json.RawMessage            `json:"state"`
-		Questions map[string]json.RawMessage `json:"questions"`
-	}{s.model, state, questions})
+	bodyFields := map[string]any{"model": s.model, "state": state, "questions": questions}
+	for name, value := range request.ExtraBody {
+		switch name {
+		case "model", "state", "questions", "assets":
+			return nil, &ValidationError{"extra_body." + name, "is managed by the SDK; use its typed request field or call option"}
+		}
+		bodyFields[name] = value
+	}
+	body, err := json.Marshal(bodyFields)
 	if err != nil {
 		return nil, &ValidationError{"request", "must be JSON-encodable"}
 	}
