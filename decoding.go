@@ -22,7 +22,7 @@ func (m HTTPMetadata) DecodeResponse(destination any) error {
 // validation remains the caller's responsibility. JSON errors support errors.As.
 func (r *SystemOneResponse) DecodeAnswers(destination any) error {
 	if r == nil {
-		return &ValidationError{"response", "must not be nil"}
+		return &ValidationError{Field: "response", Message: "must not be nil"}
 	}
 
 	var root map[string]json.RawMessage
