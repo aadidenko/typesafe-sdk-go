@@ -1,7 +1,9 @@
 # Go code style and lint policy
 
-Status: local tooling implemented; full-repository remediation and CI acceptance
-are tracked by specification #12.
+Status: complete repository remediation and local acceptance implemented, with
+shared push/PR CI gates. Exact final-head CI and review evidence belongs to
+[PR #19](https://github.com/aadidenko/typesafe-sdk-go/pull/19); the
+[manual audit](reviews/strict-go-lint-audit.md) records reviewed scope and findings.
 
 Specification: [strict Go quality gates and full Google/Uber style audit, #12](https://github.com/aadidenko/typesafe-sdk-go/issues/12).
 
@@ -68,8 +70,10 @@ and verifies both versions before use. Its binary lives outside the module in
 `${XDG_CACHE_HOME:-$HOME/.cache}/typesafe-sdk/quality/`; set
 `TYPESAFE_QUALITY_CACHE` to another absolute cache directory when needed. A cold
 cache needs network access to download the toolchain, tool, and dependencies.
-No global Go settings or SDK dependencies are modified. CI must invoke these
-same Make targets; repository-wide green acceptance is a separate delivery gate.
+No global Go settings or SDK dependencies are modified. CI's unconditional
+`quality` job invokes these same Make targets on pushes and pull requests. Its
+separate `test` job runs the minimum-toolchain commands below. A configured gate
+is distinct from the exact-head CI result recorded in the PR.
 
 `make fmt` first applies gofumpt and goimports, then runs only the `wsl_v5` and
 `nlreturn` lint fixes for normal and live-tag source, and finishes with the
@@ -90,6 +94,11 @@ lines. Revive retains its standard rules, adding exported documentation,
 scope-preserving early returns, import shadowing and control-flow nesting at
 most three. Remaining selected analyzers use pinned-version standard settings
 unless `.golangci.yml` explicitly overrides them.
+
+Manually separate multiline declarations and independent responsibilities with
+blank lines, including adjacent types and methods. The whitespace analyzers do
+not judge every declaration boundary or logical relationship; passing them does
+not replace reading the complete code.
 
 Validate compatibility separately with the SDK minimum toolchain:
 
