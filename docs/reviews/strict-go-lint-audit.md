@@ -7,6 +7,8 @@ and [ticket #14](https://github.com/aadidenko/typesafe-sdk-go/issues/14), perfor
 on **2026-10-23**, against **`cd1df2275af7848e3e9db992440260596421dbb3`**.
 This is a whole-source review of that baseline, performed independently of lint
 diagnostics. It does not claim that pending implementation or final CI has passed.
+The original findings below retain their baseline evidence; the final
+reconciliation records their implementation dispositions and local acceptance.
 
 Guidance was retrieved from its official publishers on 2026-10-23. Repository
 HEAD revisions were resolved and these exact revisions' files were fetched:
@@ -251,24 +253,193 @@ support preservation of existing scenarios; they do not establish strict-profile
 acceptance. This audit commit changes documentation only, checked with
 `git diff --check`.
 
-**Final reviewed implementation revision: pending #18.** No finding is marked
-fixed on the strength of a planned change or a passing baseline run.
+## Final implementation reconciliation
 
-[#18](https://github.com/aadidenko/typesafe-sdk-go/issues/18) must:
+**Reviewed source and CI revision:
+`2efd39400775c4f854295ac665400a7eca608222`, 2026-10-23.**
+This includes all implementation slices, the declaration-spacing correction and
+the new CI jobs. This report and accompanying policy/README edits follow that
+revision; they do not change Go source or the tested quality commands. Exact
+delivery-head and matching remote CI evidence belongs to
+[PR #19](https://github.com/aadidenko/typesafe-sdk-go/pull/19), after its final
+commit exists. No future remote CI success is claimed here.
 
-1. Re-read the resulting complete SDK/test/example flows and changes since this
-   baseline; reconcile every inventory group and new file, including live source.
-2. For AUD-001–008, append exact implementation commit references, affected public
-   tests/commands and results, or a reasoned site-specific accepted deviation.
-   Preserve the original finding and avoid equating a lint disappearance with a
-   verified behavioral correction.
-3. Enumerate every final local suppression with its file/symbol, named analyzer,
-   actual explanation and human judgement. Confirm D-001–011 still describe the
-   final code and identify any API/contract proposal as separate work.
-4. Run the complete public developer commands, read-only drift/negative checks and
-   formatting idempotence, then Go 1.25.0 race/vet/cgo-disabled/example/live-compile
-   checks. Do not run provider code. Record exact command/results, tool versions
-   and any limits of the evidence.
-5. Record the reviewed source revision here and publish the exact final PR head
-   plus matching CI in PR acceptance evidence. A report update changes the head;
-   final provenance belongs to that resulting commit, not an earlier run.
+### Final scope and independent source reread
+
+The resulting **49 Go files** were read in full, including unchanged code:
+
+| Group | Final reviewed inventory |
+| --- | --- |
+| 18 library/package files | `assets.go`, `box.go`, `choice_score.go`, `choice_score_response.go`, `client.go`, `compression.go`, `decoding.go`, `doc.go`, `environment.go`, `errors.go`, `extensions.go`, `headers.go`, `logging.go`, `models.go`, new `multipart.go`, `questions.go`, `response.go`, `retry.go` |
+| 12 focused tests | `assets_test.go`, `box_test.go`, `choice_score_test.go`, `client_test.go`, `config_test.go`, `decoding_test.go`, `extensions_test.go`, `headers_test.go`, `logging_test.go`, `models_test.go`, `ownership_test.go`, `retry_test.go` |
+| 8 combined/live/helper test files | `client_test_helpers_test.go`, `compression_test.go`, `compression_replay_test.go`, `multipart_test_helpers_test.go`, `workflow_test.go`, `workflow_fixture_test.go`, `workflow_concurrent_test.go`, `manual_live_test.go` |
+| 11 complete examples | `examples/{classification,complete,compression,custom-decoding,extensions,images,logging,models,quickstart,retries,scoring}/main.go` |
+
+The six new files since the original inventory are `multipart.go` and the five
+test/helper files `client_test_helpers_test.go`, `compression_replay_test.go`,
+`multipart_test_helpers_test.go`, `workflow_fixture_test.go` and
+`workflow_concurrent_test.go`. The original documentation, ADR and contract
+inventory remains applicable. Final README, policy, audit, Makefile, quality
+script/config and CI were also reread; unchanged consumer documentation retains
+the baseline review rather than an invented new retrieval date.
+
+Independent reread followed complete ownership, request, retry, parser and
+diagnostic flows. New responsibilities are cohesive: preparedEvaluation keeps
+encoded questions and actual bytes together, multipart preparation has a clear
+boundary, response validation separates required fields and criteria, and test
+helpers expose scenario phases without replacing public HTTP behavior.
+
+Caller clients/transports remain owned by their caller. Configuration headers,
+retry status slices and log levels are snapshotted, while per-call headers are
+cloned. Image constructors and RawQuestion retain private snapshots. Returned
+answer maps and raw response data remain caller-owned, as accepted in D-003.
+No explicit SDK background goroutine was introduced; encoder resources are
+closed, test workers join, stalled handlers observe cancellation and shared
+fixture counters/maps use atomics or mutexes.
+
+Total/attempt contexts, stopped retry timers, no retry after cancellation,
+joined error classifications and final/partial metadata remain intact. A final
+attempt that receives no response has no metadata from an earlier attempt.
+Response validation retains required names/types, numerical limits, contiguous
+Score levels, requested criteria and nullable Box Confidence. Unknown raw data
+and ordinary caller decoding remain available. Diagnostic bodies still require
+separate opt-in; secret headers are copied/redacted, and raw transport causes
+and protocol field paths remain excluded from automatic logs.
+
+Complete consumer scenarios still combine discovery, all four Questions, image
+Assets, compression, retry, typed/custom decoding, extensions, metadata,
+permission errors and caller-client reuse. Twelve concurrent calls prove
+isolation through distinct wire models, headers, questions, references, pixels
+and responses. Compressed replay tests cross JSON/multipart with zstd/gzip:
+observe first bytes, select buffered HTTP 503, mutate actual caller state/source
+file, return, then compare replayed bytes and content type. Both attempts retain
+the original state/image; the custom marshaller still runs once. Helpers reached
+by HTTP handlers or workers report nonfatally and return before consuming failed
+reads/decodes; fatal setup/result helpers stay in the test goroutine.
+
+Examples preserve explicit model/media selection and direct SDK usage. Their
+resource-owning functions return before main exits, so contexts, local servers
+and caller transports clean up on errors. Normal output is checked. Tagged live
+tests retain the build tag, explicit environment/key gates and 30-second bounds;
+no semantic model-quality threshold or automatic provider invocation was added.
+
+No confirmed SDK runtime defect was found. The corrected defects concern test
+failure handling/timing and example output/cleanup. The review is bounded evidence,
+not proof of universal guide compliance or absence of defects.
+
+### Finding dispositions
+
+All original IDs and evidence above are retained. The following dispositions
+supersede their initial pending status; shared full-repository validation below
+supports the retained public scenarios, rather than testing private extraction.
+
+| Finding | Final disposition and concrete implementation |
+| --- | --- |
+| AUD-001 | Resolved. [f1469a0](https://github.com/aadidenko/typesafe-sdk-go/commit/f1469a0) applies mechanical formatting; the slice refactors preserve logical grouping. Independent reread still found fused Client/callSettings and Error/Unwrap declaration boundaries despite passing analyzers; [bee4ac5](https://github.com/aadidenko/typesafe-sdk-go/commit/bee4ac5) adds four explicit separations. All 49 Go files remain byte-identical across both final full formatter runs. |
+| AUD-002 | Resolved by [7d01f25](https://github.com/aadidenko/typesafe-sdk-go/commit/7d01f25): configuration/default/URL checks, snapshot construction, encoded evaluation preparation, retry classification and cancelable wait have coherent responsibilities. Client/config/header/ownership/retry/logging HTTP tests retain deadline, failure metadata, snapshot and reuse assertions. |
+| AUD-003 | Resolved by [2bf37cc](https://github.com/aadidenko/typesafe-sdk-go/commit/2bf37cc): root/Usage/Answer parsing, Score legend/probabilities/criteria, Box coordinates/confidence and multipart preparation are explicit phases. Mixed/malformed/cardinality/image/snapshot/decoder/extension tests retain wire semantics and protocol paths. |
+| AUD-004 | Resolved by [146b4fc](https://github.com/aadidenko/typesafe-sdk-go/commit/146b4fc), [a1ac960](https://github.com/aadidenko/typesafe-sdk-go/commit/a1ac960) and [5f9ba95](https://github.com/aadidenko/typesafe-sdk-go/commit/5f9ba95). Complete and concurrent workflows remain whole public-client journeys. Replay causality is strengthened by mutating the actual caller state after first failure; exact wire equality and once-only encoding remain. Complete example helpers follow discovery/request/typed/application/full-output phases. |
+| AUD-005 | Resolved through [4ea102a](https://github.com/aadidenko/typesafe-sdk-go/commit/4ea102a), [72e23f4](https://github.com/aadidenko/typesafe-sdk-go/commit/72e23f4), [146b4fc](https://github.com/aadidenko/typesafe-sdk-go/commit/146b4fc) and distinct example correction [b68dc77](https://github.com/aadidenko/typesafe-sdk-go/commit/b68dc77). Constructors, fixture reads/decodes/writes, assertions and meaningful finalization errors are checked. Fourteen exact local annotations are reviewed below; no blanket exclusion replaces error intent. |
+| AUD-006 | Fixed separately in [fae21ae](https://github.com/aadidenko/typesafe-sdk-go/commit/fae21ae), retained through 72e23f4. Mixed-question handler decode failure reports nonfatally and returns. Reread follows handler helper call sites; existing mixed public HTTP test remains. This is test-control correction, not SDK response behavior change. |
+| AUD-007 | Resolved by 7d01f25/2bf37cc: Client/options/constants/error categories, typed accessors and Kind methods now have standalone comments describing actual semantics. Exported AST comparison retains 96 declarations without signature/initializer differences. |
+| AUD-008 | Resolved by 7d01f25/2bf37cc/4ea102a/72e23f4/146b4fc/5f9ba95: keyed client/error/wire/Image construction and wide test rows communicate roles. Small clear standard geometry literals remain intentionally readable under D-008. |
+
+### AUD-009 — Timeout fixture assumed final response metadata always exists
+
+This additional **test-only** finding emerged during execution. A full #16 race
+run failed `TestAttemptTimeoutControlAndTotalBudget/true` using 15 ms/55 ms limits.
+A pre-fix 50-case race loop reproduced three failures; a 100-run diagnostic loop
+confirmed entirely empty metadata when the final attempt received no response,
+with deadline/transport identity preserved. The SDK correctly reports that final
+attempt rather than substituting previous metadata; no runtime defect was found.
+
+Distinct correction [11237f8](https://github.com/aadidenko/typesafe-sdk-go/commit/11237f8)
+uses 100 ms/250 ms margins, retains exact single-attempt partial metadata, accepts
+only exact partial or entirely empty final metadata in retry mode, and preserves
+deadline/Transport classification, bounded attempts and a one-second elapsed
+bound. [cf86c63](https://github.com/aadidenko/typesafe-sdk-go/commit/cf86c63) keeps
+these assertions together under the complexity limit. Comparable post-fix 50-case
+race stress passed, followed by five further race iterations and the final full
+race run below. The earlier failed run remains part of the provenance.
+
+### Final local suppression review
+
+All **14 exact-site annotations** were read in context. The table quotes their
+actual explanations; acceptance is a human judgment of the invariant, separately
+from nolintlint's final normal/live success.
+
+| File/symbol/site | Named analyzer and actual explanation | Review judgment |
+| --- | --- | --- |
+| assets.go / ImageFromFile / ReadFile | gosec: `The caller intentionally selects the image file path.` | Accepted: caller-selected paths are the intended API input. Errors omit path content; restricting traversal would change the contract. |
+| client.go / doAttempt / deferred Body.Close | errcheck: `Body bytes and read errors are authoritative; cleanup must not change a completed response.` | Accepted: bytes or the authoritative read failure are captured before return; closure still runs and cannot replace a valid evaluation or actual failure. |
+| compression.go / compressRequest / deferred zstd Close | errcheck: `EncodeAll has no streaming output; cleanup cannot invalidate its completed in-memory bytes.` | Accepted: NewWriter(nil) plus completed EncodeAll has no pending output. Gzip/multipart finalization errors are checked separately. |
+| environment.go / APIKeyEnv | gosec: `G101: environment variable name, not an embedded credential.` | Accepted: public variable name TYPESAFE_API_KEY is not a token. |
+| multipart.go / prepareAssets / descriptor Marshal | errcheck: `Image descriptors contain only string fields, so JSON encoding cannot fail.` | Accepted: concrete map[string]imageDescriptor with string Type/Part, no caller marshaler/cycle/unsupported data. Root JSON and writer errors remain checked. |
+| retry.go / delay / random jitter | gosec: `G404: jitter spreads retry scheduling; it is not a security random value.` | Accepted: randomness scales a scheduling delay, not key/token material. |
+| retry.go / retryableTransport / Temporary | staticcheck: `SA1019: temporary net.Error remains part of the SDK's accepted retry contract.` | Accepted: preserves established transient-network eligibility; replacing it solely for style would change behavior. |
+| client_test.go / TestInvalidConfiguration / credentialed URL | gosec: `G101: deliberately invalid URL credentials exercise rejection before HTTP.` | Accepted: fabricated user:password@example.com is a local-invalid-input oracle, not a credential. |
+| headers_test.go / TestHeadersAreCanonicalOverridesAndCallerOwned / defaults mutation | staticcheck: `SA1008: mutate the original noncanonical key to verify the SDK snapshot.` | Accepted: intentional direct original-map indexing proves snapshot isolation. |
+| Same test / override mutation | staticcheck: `SA1008: mutate mixed-case caller data after the option snapshots it.` | Accepted: proves WithHeaders owns its snapshot; canonicalizing fixture data would weaken coverage. |
+| Same test / final caller-key assertion | staticcheck: `SA1008: assert the SDK has preserved both original noncanonical caller keys.` | Accepted: proves SDK did not rewrite caller-owned maps. |
+| ownership_test.go / TestConcurrentModelsAndEvaluationsKeepCallSettingsIsolated / headers mutation | staticcheck: `SA1008: deliberately mutate the original noncanonical map key to verify snapshot isolation.` | Accepted: original slice mutation follows NewClient, with concurrent/default wire assertions retaining the snapshot. |
+| compression_test.go / TestCompressedBodyAlsoRespectsProviderLimit / seeded rand | gosec: `G404: deterministic incompressible fixture bytes contain no secrets.` | Accepted: seeded bytes create reproducible near-limit PNG trailing data; no security randomness is required. |
+| examples/complete/main.go / reportError / final stderr | errcheck: `This is the final stderr diagnostic; reporting its write failure to the same failed stream cannot help.` | Accepted: terminal diagnostic follows resource cleanup and precedes nonzero exit. Normal stdout and fixture writes are checked. |
+
+No broad file/test/path/Close/printing exclusion was added. Removed narrowing
+pixel conversions use twelve explicit uint8 fixture values; no security
+suppression hides their isolation assertion. No annotation was unused under the
+complete final profile.
+
+### Retained deviations and out-of-scope decisions
+
+D-001–011 remain applicable after the complete source reread: established public
+names/options/embedding, caller-owned mutable results/request maps, synchronous
+preparation boundaries, explicit sensitive raw data/body logging, Google naming
+precedence, useful literal/geometry context and intentional paths/jitter remain
+unchanged. D-002 is implemented by the exact Body.Close exception above. D-010 is
+now checked against resource-owner-return-before-exit in every example. No new
+SDK background worker, dependency, API redesign or separate contract-changing
+finding is required to resolve AUD-001–009. These deviations are not claims that
+an incompatible recommendation was implemented.
+
+### Local acceptance and remote delivery boundary
+
+At reviewed revision 2efd394, using golangci-lint 2.15.0 built with Go 1.26.2 and
+analysis target Go 1.25, all following commands passed:
+
+| Command/check | Observed result |
+| --- | --- |
+| `make fmt` twice | Both exit 0. SHA256 map of all 49 Go files identical before/after each full pipeline, including final read-only verification. |
+| `make fmt-check` | Exit 0; normal/live whitespace checks each 0 issues; all Go hashes unchanged. |
+| `make lint` | Configuration verification and complete normal/live analysis pass, each 0 issues; all Go hashes unchanged. |
+| `GOTOOLCHAIN=go1.25.0 go test -race ./...` | Pass; SDK 31.835s; all eleven example packages compile. Includes full ownership, deadline, parser, diagnostic, complete/concurrent and replay scenarios. |
+| `GOTOOLCHAIN=go1.25.0 go vet ./...` | Exit 0. |
+| `CGO_ENABLED=0 GOTOOLCHAIN=go1.25.0 go build ./...` | Exit 0; includes all examples. |
+| `GOTOOLCHAIN=go1.25.0 go test -tags=typesafe_live -run '^$' ./...` | Pass, SDK 0.563s with no tests selected; all examples compile; no provider execution. |
+| Exported AST comparison | 96 declarations, zero normalized signature/initializer differences from pre-refactor snapshot. Comments, layout and private bodies excluded deliberately. |
+| Contract/module comparison | go.mod, go.sum and pinned OpenAPI snapshot byte-identical to merged baseline 718bdf2. |
+
+Controlled temporary-module command smoke evidence was rerun by the coordinator
+at integrated aa45b7d: **26 checks passed**, including positive command behavior,
+ordinary formatting/logical whitespace drift, read-only hash stability, strict
+unchecked-output errors, test/live-tag coverage, complexity/function-size
+violations, cognitive 15 acceptance and retention of unrelated semantic fixes.
+Earlier empty-cache automatic tool installation also passed. Tooling/config
+files are unchanged since those checks, so their results are reused rather than
+represented as a new run here. The pinned whitespace fixer's inline-semicolon
+limitation is documented; make fmt now fails honestly if its final check finds a
+remaining diagnostic. Manual declaration spacing above shows why mechanical
+success is not a complete readability judgment.
+
+CI commit [2efd394](https://github.com/aadidenko/typesafe-sdk-go/commit/2efd394)
+adds an unconditional quality job on pushes and pull requests, invoking shared
+make fmt-check/make lint with Go 1.26.2. The separate Go 1.25.0 job retains race,
+vet and cgo-disabled build and adds live compilation with an empty selection.
+This is required workflow execution with no path/new-code filters or
+continue-on-error; no remote branch-protection configuration is claimed.
+
+No provider test/example, paid call, release, deployment or PR merge was performed
+for this acceptance. The report's source revision is exact, but its own commit
+changes delivery HEAD. PR #19 is the record for the exact delivery head, matching
+remote CI results and independent final review after this report commit. Those
+results concern the resulting head rather than the earlier local source revision.

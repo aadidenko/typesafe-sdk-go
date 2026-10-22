@@ -50,6 +50,7 @@ type Client struct {
 	headers                     http.Header
 	attemptTimeout, callTimeout time.Duration
 }
+
 type callSettings struct {
 	compression                 Compression
 	retry                       RetryPolicy
