@@ -3,7 +3,6 @@ package typesafe_test
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,7 +15,10 @@ import (
 func TestManagedHeadersAreRejectedBeforeHTTP(t *testing.T) {
 	var requests atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); io.WriteString(w, `{"models":[]}`) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		fixtureWriteString(t, w, `{"models":[]}`)
+	}))
 
 	defer server.Close()
 
@@ -50,7 +52,7 @@ func TestHeadersAreCanonicalOverridesAndCallerOwned(t *testing.T) {
 			t.Errorf("unexpected headers: %v", r.Header)
 		}
 
-		io.WriteString(w, `{"models":[]}`)
+		fixtureWriteString(t, w, `{"models":[]}`)
 	}))
 	defer server.Close()
 
@@ -64,13 +66,16 @@ func TestHeadersAreCanonicalOverridesAndCallerOwned(t *testing.T) {
 
 	option := typesafe.WithHeaders(overrides)
 
+	//nolint:staticcheck // SA1008: mutate the original noncanonical key to verify the SDK snapshot.
 	defaults["x-project"][0] = "mutated-default"
+	//nolint:staticcheck // SA1008: mutate mixed-case caller data after the option snapshots it.
 	overrides["x-PROJECT"][0] = "mutated-call"
 
 	if _, err := client.ListModels(context.Background(), option); err != nil {
 		t.Fatal(err)
 	}
 
+	//nolint:staticcheck // SA1008: assert the SDK has preserved both original noncanonical caller keys.
 	if defaults["x-project"][0] != "mutated-default" || overrides["x-PROJECT"][0] != "mutated-call" {
 		t.Fatal("SDK modified caller headers")
 	}

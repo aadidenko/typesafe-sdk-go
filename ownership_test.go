@@ -2,10 +2,8 @@ package typesafe_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -24,31 +22,41 @@ type ownedTransport struct {
 func (t *ownedTransport) CloseIdleConnections() { t.closed.Store(true) }
 
 func TestSuppliedHTTPClientAndTransportRemainCallerOwned(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"models":[]}`) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fixtureWriteString(t, w, `{"models":[]}`) }))
 	defer server.Close()
 
-	transport := &ownedTransport{RoundTripper: http.DefaultTransport.(*http.Transport).Clone()}
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatal("default transport does not support cloning")
+	}
 
-	defer transport.RoundTripper.(*http.Transport).CloseIdleConnections()
+	clonedTransport := defaultTransport.Clone()
+	transport := &ownedTransport{RoundTripper: clonedTransport}
 
-	redirect := func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }
+	defer clonedTransport.CloseIdleConnections()
+
+	redirect := func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	shared := &http.Client{Transport: transport, Timeout: 9 * time.Second, CheckRedirect: redirect}
 
-	client, err := typesafe.NewClient(typesafe.Config{APIKey: "test-key", BaseURL: server.URL, HTTPClient: shared})
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := mustClient(t, typesafe.Config{APIKey: "test-key", BaseURL: server.URL, HTTPClient: shared})
 
 	if _, err := client.ListModels(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	response, err := shared.Get(server.URL)
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	response.Body.Close()
+	response, err := shared.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if shared.Transport != transport || shared.Timeout != 9*time.Second || shared.CheckRedirect == nil || transport.closed.Load() {
 		t.Fatal("SDK mutated or closed caller resources")
@@ -57,27 +65,7 @@ func TestSuppliedHTTPClientAndTransportRemainCallerOwned(t *testing.T) {
 
 func TestConcurrentModelsAndEvaluationsKeepCallSettingsIsolated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/gateway/v1/models" {
-			if r.Header.Get("X-Session") == "" {
-				t.Error("missing model-call header")
-			}
-
-			io.WriteString(w, `{"models":[]}`)
-
-			return
-		}
-
-		var body struct{ Model string }
-
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Error(err)
-		}
-
-		if r.Header.Get("X-Session") != body.Model {
-			t.Errorf("settings leaked: %s/%s", r.Header.Get("X-Session"), body.Model)
-		}
-
-		fmt.Fprintf(w, `{"model":%q,"answers":{"billing":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`, body.Model)
+		serveIsolatedCall(t, w, r)
 	}))
 	defer server.Close()
 
@@ -88,6 +76,7 @@ func TestConcurrentModelsAndEvaluationsKeepCallSettingsIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	//nolint:staticcheck // SA1008: deliberately mutate the original noncanonical map key to verify snapshot isolation.
 	headers["x-session"][0] = "caller-changed"
 
 	var wg sync.WaitGroup
@@ -136,7 +125,7 @@ func TestListModelsSharesCancellationHTTPErrorAndTimeoutBehavior(t *testing.T) {
 
 		w.Header().Set("x-typesafe-request-id", "models-forbidden")
 		w.WriteHeader(http.StatusForbidden)
-		io.WriteString(w, "denied")
+		fixtureWriteString(t, w, "denied")
 	}))
 	defer server.Close()
 
@@ -165,4 +154,30 @@ func TestListModelsSharesCancellationHTTPErrorAndTimeoutBehavior(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline lost: %v", err)
 	}
+}
+
+func serveIsolatedCall(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+
+	if r.URL.Path == "/gateway/v1/models" {
+		if r.Header.Get("X-Session") == "" {
+			t.Error("missing model-call header")
+		}
+
+		fixtureWriteString(t, w, `{"models":[]}`)
+
+		return
+	}
+
+	var body struct{ Model string }
+
+	if !fixtureDecode(t, r.Body, &body) {
+		return
+	}
+
+	if r.Header.Get("X-Session") != body.Model {
+		t.Errorf("settings leaked: %s/%s", r.Header.Get("X-Session"), body.Model)
+	}
+
+	fixtureWriteString(t, w, fmt.Sprintf(`{"model":%q,"answers":{"billing":{"type":"noul","noul":0.5}},"usage":{"input_tokens":0,"output_tokens":0}}`, body.Model))
 }
