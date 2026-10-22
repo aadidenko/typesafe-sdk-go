@@ -13,13 +13,19 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	policy := typesafe.DefaultRetryPolicy()
 
 	policy.MaxRetries = 1
 
 	client, err := typesafe.NewClient(typesafe.Config{APIKey: os.Getenv("TYPESAFE_API_KEY"), Retry: &policy, AttemptTimeout: 3 * time.Second, CallTimeout: 8 * time.Second})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -31,14 +37,18 @@ func main() {
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			log.Fatal("evaluation exceeded its deadline")
+			return fmt.Errorf("evaluation exceeded its deadline: %w", err)
 		}
 
-		log.Fatal(err)
+		return err
 	}
 
-	fmt.Printf("Model %s, request ID %s\n", response.Model, response.RequestID)
+	if _, err := fmt.Printf("Model %s, request ID %s\n", response.Model, response.RequestID); err != nil {
+		return err
+	}
 
 	// For a single attempt on a future call, pass:
 	// typesafe.WithRetryPolicy(typesafe.RetryPolicy{})
+
+	return nil
 }

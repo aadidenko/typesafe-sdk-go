@@ -11,8 +11,8 @@ import (
 	typesafe "github.com/aadidenko/typesafe-sdk-go"
 )
 
-// These tests are deliberately absent from ordinary test/CI builds. The second
-// gate protects against accidental execution when a live-tag build is selected.
+// Ordinary test runs exclude this source. CI analyzes and compiles the live-tag
+// suite without selecting tests; the environment gates also protect manual runs.
 func liveClient(t *testing.T) *typesafe.Client {
 	t.Helper()
 
